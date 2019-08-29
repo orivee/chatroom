@@ -107,12 +107,12 @@ int server_del_fd_from_epoll(int epfd, int fd)
 /* postcondition: */
 /* 0：读段断开 */
 /* -1：read 失败 */
-int server_read_from_client(int cfd)
+int server_read_from_client(int cfd, protocol_t ** ppprot)
 {
     int retval;
-    protocol_t * pprot;
 
-    pprot = malloc(sizeof(protocol_t) + sizeof(message_t));
+    *ppprot = malloc(sizeof(protocol_t) + sizeof(message_t));
+    protocol_t * pprot = *ppprot;
     memset(pprot, 0x00, sizeof(protocol_t) + sizeof(message_t));
 
     retval = read(cfd, pprot, sizeof(protocol_t));
@@ -122,7 +122,6 @@ int server_read_from_client(int cfd)
         {
             perror("read()");
             /* 写端断开，应该从 epoll 中移除此 fd */
-
             return 0;
         }
         else
@@ -136,28 +135,29 @@ int server_read_from_client(int cfd)
         printf("message size: %d\n", pprot->size);
     }
 
-    message_t * pmsg = (message_t *) malloc(sizeof(message_t));
+    /* message_t * pmsg = (message_t *) malloc(sizeof(message_t)); */
 
-    retval = read(cfd, pmsg, sizeof(message_t));
+    retval = read(cfd, pprot->datap, sizeof(message_t));
     if (retval <= 0)
     {
         if (0 == retval)
         {
             perror("read()");
-            free(pmsg);
+            /* free(pmsg); */
             return 0;
         }
         else
         {
             perror("read()");
-            free(pmsg);
+            /* free(pmsg); */
             return -1;
         }
     }
     else
     {
+        message_t * pmsg = (message_t *) pprot->datap;
         printf("target: %d, message: %s\n", pmsg->fd, pmsg->message);
-        free(pmsg);
+        /* free(pmsg); */
     }
 
     return 1;
@@ -226,11 +226,15 @@ main(int argc, char * argv[])
             }
             else /* connected fd */
             {
-                retval = server_read_from_client(cfd);
+                printf("DEBUG read() ...\n");
+                retval = server_read_from_client(events[i].data.fd, &pprot);
                 if (0 == retval)
                 {
                     server_del_fd_from_epoll(epfd, events[i].data.fd);
                 }
+                pmsg = (message_t *) pprot->datap;
+                printf("target: %d, message: %s\n", pmsg->fd, pmsg->message);
+                write_to_client(pmsg->fd, pprot);
             }
         }
 
