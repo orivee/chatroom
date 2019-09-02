@@ -10,28 +10,10 @@
 #include <arpa/inet.h>
 #include <sys/epoll.h>
 
-#define STRMAX 31
-#define MSGMAX 1024 
-
-typedef struct online_user
+typedef struct msgprot
 {
-    char username[STRMAX];
-    int fd;
-} online_t;
-
-typedef struct send_message
-{
-    /* online_t target; */
-    int fd;
-    char message[MSGMAX];
-} message_t;
-
-typedef struct protocol
-{
-    uint32_t size; /* 发送的数据包大小 */
-    // uint16_t type; /* TODO: 消息类型 */
-    char * datap[0];
-
-} protocol_t;
+    uint32_t length; /* 发送消息的长度 */
+    char * msgp[0];
+} msgprot_t;
 
 #endif

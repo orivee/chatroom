@@ -1,243 +1,259 @@
 #include "commons.h"
+#include <pthread.h>
 
+#define BUFFER_SZ 2048
+#define SERVER_ADDR "127.0.0.1"
+#define SERVER_PORT 7000
 #define BACKLOG 5
 #define EVMAX 100
 
-/* description: */
-/* precondition: */
-/* postcondition: */
-void server_tcp_init(int * pfd)
-{
-    int retval;
-    struct sockaddr_in saddr;
+static int uid = 0;
 
-    *pfd = socket(AF_INET, SOCK_STREAM, 0);
-    if (-1 == *pfd)
+/* client structure */
+typedef struct {
+    struct sockaddr_in addr; /* Client remote address */
+    int connfd;              /* Connection file descriptor */
+    int uid;                 /* Client unique identifier */
+    char name[32];           /* Client name */
+} client_t;
+
+/* online users list */
+typedef struct online {
+    client_t client;
+    struct online * next;
+} online_t;
+
+typedef online_t * ol_uids_t;
+ol_uids_t ol_uids = NULL; /* online list head */
+
+pthread_mutex_t clients_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+void setup_server_listen(int * plistenfd)
+{
+    int status;
+    struct sockaddr_in serv_addr;
+
+    /* socket settings */
+    *plistenfd = socket(AF_INET, SOCK_STREAM, 0);
+    if (-1 == *plistenfd)
     {
-        /* TODO: log */
-        perror("socket()");
-        exit(-1);
+        perror("socket creating failed");
+        exit(EXIT_FAILURE);
+    }
+    serv_addr.sin_family = AF_INET;
+    serv_addr.sin_port = htons(SERVER_PORT);
+    if (0 == inet_pton(AF_INET, SERVER_ADDR, &serv_addr.sin_addr))
+    {
+        fprintf(stderr, "converting %s to IPv4 address failed!\n", SERVER_ADDR);
+        close(*plistenfd);
+        exit(EXIT_FAILURE);
     }
 
-    saddr.sin_family = AF_INET;
-    saddr.sin_port = htons(30000);
-    if (inet_pton(AF_INET, "127.0.0.1", &saddr.sin_addr) <= 0)
+    /* bind */
+    status = bind(*plistenfd, (struct sockaddr *) &serv_addr, sizeof(serv_addr));
+    if (-1 == status)
     {
-        /* TODO: log */
-        fprintf(stderr, "server fails to convert IPv4 address!\n");
-        exit(-1);
-    }
-    retval = bind(*pfd, (struct sockaddr *) &saddr, sizeof(saddr));
-    if (-1 == retval)
-    {
-        /* TODO: log */
-        perror("bind()");
-        exit(-1);
+        perror("socket binding failed");
+        close(*plistenfd);
+        exit(EXIT_FAILURE);
     }
 
-    retval = listen(*pfd, BACKLOG);
-    if (-1 == retval)
+    /* listen */
+    status = listen(*plistenfd, BACKLOG);
+    if (-1 == status)
     {
-        /* TODO: log */
-        perror("listen()");
-        exit(-1);
-    }
-
-}
-
-void server_epoll_init(int * pfd, int * pepfd)
-{
-    *pepfd = epoll_create(20);
-    if (-1 == *pepfd)
-    {
-        /* TODO: log */
-        perror("epoll_create()");
-        close(*pfd);
-        exit(-1);
+        perror("socket listening failed");
+        close(*plistenfd);
+        exit(EXIT_FAILURE);
     }
 }
 
-int server_accept_client(int lfd)
+/* accept a client */
+client_t * accept_client(int * plistenfd, int * pconnfd)
 {
-    int cfd;
+    struct sockaddr_in cli_addr;
 
-    /* TODO 暂时不需要连接端地址 */
-    cfd = accept(lfd, NULL, NULL);
-    printf("DEBUG cfd: %d\n", cfd);
-
-    return cfd;
-}
-
-/* description: */
-/* precondition: */
-/* postcondition: */
-/* 如果是 lfd，需要退出程序
- * 如果是 nfd，关闭 nfd，并推出客户端 */
-int server_add_fd_to_epoll(int epfd, int fd)
-{
-    int retval;
-    struct epoll_event ev;
-
-    ev.events = EPOLLIN;
-    ev.data.fd = fd;
-    retval = epoll_ctl(epfd, EPOLL_CTL_ADD, fd, &ev);
-    if (-1 == retval)
-        return -1;
-
-    /* TODO: nfd list */
-
-    return 0;
-}
-
-int server_del_fd_from_epoll(int epfd, int fd)
-{
-    int retval;
-
-    retval = epoll_ctl(epfd, EPOLL_CTL_DEL, fd, NULL);
-    if (-1 == retval)
-        return -1;
-
-    /* TODO: nfd list */
-
-    return 0;
-}
-
-/* description: */
-/* precondition: */
-/* postcondition: */
-/* 0：读段断开 */
-/* -1：read 失败 */
-int server_read_from_client(int cfd, protocol_t ** ppprot)
-{
-    int retval;
-
-    *ppprot = malloc(sizeof(protocol_t) + sizeof(message_t));
-    protocol_t * pprot = *ppprot;
-    memset(pprot, 0x00, sizeof(protocol_t) + sizeof(message_t));
-
-    retval = read(cfd, pprot, sizeof(protocol_t));
-    if (retval <= 0)
+    socklen_t clilen = sizeof(cli_addr);
+    *pconnfd = accept(*plistenfd, (struct sockaddr *) &cli_addr, &clilen);
+    if (-1 == *pconnfd)
     {
-        if (0 == retval)
+        perror("client accepting failed");
+        close(*plistenfd);
+        exit(EXIT_FAILURE);
+    }
+
+    client_t * cli = (client_t *) malloc(sizeof(client_t));
+    cli->addr = cli_addr;
+    cli->connfd = *pconnfd;
+    cli->uid = uid++;
+    strcpy(cli->name, "anonymous");
+
+    return cli;
+}
+
+/* add new client to  online uids */
+void online_add(client_t * pcli)
+{
+    pthread_mutex_lock(&clients_mutex);
+    online_t * ponline = (online_t *) malloc(sizeof(online_t));
+    ponline->client = *pcli;
+
+    ponline->next = ol_uids;
+    ol_uids = ponline;
+    pthread_mutex_unlock(&clients_mutex);
+}
+
+/* delete offline client from online uids */
+void online_delete(int uid)
+{
+    pthread_mutex_lock(&clients_mutex);
+    ol_uids_t pprev = ol_uids, psave;
+    while (pprev->next != NULL)
+    {
+        if ((pprev->next->client).uid == uid)
         {
-            perror("read()");
-            /* 写端断开，应该从 epoll 中移除此 fd */
-            return 0;
+            psave = pprev->next;
+            pprev->next = pprev->next->next;
+            free(psave);
+            break;
+        }
+    }
+    pthread_mutex_unlock(&clients_mutex);
+}
+
+/* Print ip address */
+void print_client_addr(struct sockaddr_in addr)
+{
+    char addr_str[INET_ADDRSTRLEN];
+    inet_ntop(AF_INET, (void *) &addr.sin_addr, addr_str, sizeof(addr_str));
+    printf("%s:%d", addr_str, ntohs(addr.sin_port));
+}
+
+char * read_client(int connfd, int len)
+{
+    char * buffer_in = malloc(1024);
+    read(connfd, buffer_in, 1024);
+
+    return buffer_in;
+}
+
+msgprot_t * message_pack(char * msg)
+{
+    msgprot_t * pmsgprot = malloc(sizeof(msgprot_t) + strlen(msg));
+    pmsgprot->length = strlen(msg);
+    memcpy(pmsgprot->msgp, msg, strlen(msg));
+    return pmsgprot;
+}
+
+/* 返回消息长度 */
+int message_unpack(int connfd, char ** pmsg, size_t size)
+{
+
+        *pmsg = malloc(size + 1);
+        int rlen = read(connfd, *pmsg, size);
+        (*pmsg)[rlen] = '\0';
+        if (rlen <= 0)
+        {
+            perror("message reading failed");
+        }
+        return rlen;
+}
+
+void send_message_self(msgprot_t * pmsgprot, int connfd)
+{
+    if (write(connfd, pmsgprot, sizeof(msgprot_t) + pmsgprot->length) < 0)
+    {
+        perror("writing to descriptor failed");
+        close(connfd);
+        exit(EXIT_FAILURE); 
+    }
+}
+
+void send_message_client(msgprot_t * pmsgprot, int connfd)
+{
+
+}
+
+void * handle_client(void * arg)
+{
+    char buffer_out[BUFFER_SZ];
+    char * buffer_in;
+    msgprot_t msgprot;
+    int msglen;
+
+    client_t * pcli = (client_t *) arg;
+
+    printf("<< accept ");
+    print_client_addr(pcli->addr);
+    printf(" logged in with annoymous and referenced by %d\n", pcli->uid);
+
+    /* pthread_mutex_lock(&clients_mutex); */
+    /* sprintf(buffer_out, "<< accept [%s (%d)] login\n", pcli->name, pcli->uid); */
+    /* write(pcli->connfd, buffer_out, sizeof(buffer_out)); */
+    /* perror("write to client"); */
+    /* pthread_mutex_unlock(&clients_mutex); */
+
+    while (read(pcli->connfd, &msgprot, sizeof(msgprot_t)) > 0)
+    {
+        msglen = message_unpack(pcli->connfd, &buffer_in, msgprot.length);
+        if (msglen <= 0)
+            break;
+        /* 读取的数据长度不一致，舍弃 */
+        if (msglen != msgprot.length)
+            continue;
+
+        if (buffer_in[0] == '/')
+        {
+            char * command, * param;
+            command = strtok(buffer_in, " ");
+            printf("command: %s\n", command);
+            if (!strcmp(command, "/quit"))
+            {
+                break;
+            }
+            else
+            {
+                send_message_self(message_pack("<< unkown command\n"), pcli->connfd);
+            }
         }
         else
         {
-            perror("read()");
-            return -1;
+            printf("[DEBUG] << accept %s\n", buffer_in);
         }
     }
-    else
-    {
-        printf("message size: %d\n", pprot->size);
-    }
 
-    /* message_t * pmsg = (message_t *) malloc(sizeof(message_t)); */
+    fprintf(stdout, "<< %s has left\r\n", pcli->name);
+    online_delete(pcli->uid);
+    close(pcli->connfd);
 
-    retval = read(cfd, pprot->datap, sizeof(message_t));
-    if (retval <= 0)
-    {
-        if (0 == retval)
-        {
-            perror("read()");
-            /* free(pmsg); */
-            return 0;
-        }
-        else
-        {
-            perror("read()");
-            /* free(pmsg); */
-            return -1;
-        }
-    }
-    else
-    {
-        message_t * pmsg = (message_t *) pprot->datap;
-        printf("target: %d, message: %s\n", pmsg->fd, pmsg->message);
-        /* free(pmsg); */
-    }
-
-    return 1;
+    return (void *) EXIT_SUCCESS;
 }
 
-void write_to_client(int fd, protocol_t * pprot)
+int main(int argc, char * argv[])
 {
-    int retval;
+    int listenfd = 0, connfd = 0;
+    pthread_t tid;
 
-    printf("DEBUG write() ...\n");
-    retval = write(fd, pprot, sizeof(protocol_t) + sizeof(message_t));
-    perror("write()");
-    if (-1 == retval)
-    {
-        /* TODO: log */
-        perror("write()");
-    }
-    free(pprot);
-}
+    /* read server config */
+    /* TODO: func */
 
-int
-main(int argc, char * argv[])
-{
-    int lfd, epfd, cfd;
-    struct epoll_event events[EVMAX];
-    protocol_t * pprot = NULL;
-    message_t * pmsg;
-    int nfound = 0;
+    /* read user database */
+    /* TODO: func */
+    uid = 10;
 
-    int retval;
+    setup_server_listen(&listenfd);
 
-    server_tcp_init(&lfd);
-    server_epoll_init(&lfd, &epfd);
-    retval = server_add_fd_to_epoll(epfd, lfd);
-    if (-1 == retval)
-    {
-        /* TODO: log */
-        fprintf(stderr, "lfd fails to add to epoll.\n");
-        close(lfd);
-        close(epfd);
-        exit(-1);
-    }
+    printf("<[ SERVER STARTED ]>\n");
 
     while (1)
     {
-        printf("DEBUG epoll wait ...\n");
-        nfound = epoll_wait(epfd, events, EVMAX, -1);
+        client_t * cli = accept_client(&listenfd, &connfd);
 
-        printf("DEBUG nfound = %d\n", nfound);
+        /* add client to online list and fork thread */
+        online_add(cli);
+        pthread_create(&tid, NULL, handle_client, (void *) cli);
 
-        for (int i = 0; i < nfound; i++)
-        {
-            printf("DEBUG fd ready: %d\n", events[i].data.fd);
-            /* listen fd */
-            if (events[i].data.fd == lfd)
-            {
-                cfd = server_accept_client(lfd);
-                if (-1 == cfd)
-                {
-                    /* TODO: log */
-                    fprintf(stderr, "client fails to connect.!\n");
-                    continue;
-                }
-
-                server_add_fd_to_epoll(epfd, cfd);
-            }
-            else /* connected fd */
-            {
-                printf("DEBUG read() ...\n");
-                retval = server_read_from_client(events[i].data.fd, &pprot);
-                if (0 == retval)
-                {
-                    server_del_fd_from_epoll(epfd, events[i].data.fd);
-                }
-                pmsg = (message_t *) pprot->datap;
-                printf("target: %d, message: %s\n", pmsg->fd, pmsg->message);
-                write_to_client(pmsg->fd, pprot);
-            }
-        }
-
+        sleep(1);
     }
 
     return 0;

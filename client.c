@@ -1,5 +1,9 @@
 #include "commons.h"
 
+#define SERVER_ADDR "127.0.0.1"
+#define SERVER_PORT 7000
+#define BUFFER_SZ 2048
+
 void eatinput()
 {
     while(getchar() != '\n')
@@ -25,6 +29,7 @@ char * s_gets(char * st, int n)
     return retval;
 }
 
+#if 0
 /* description: initiliaze client socket */
 /* precondition: poi*pnt to a socket fd */
 /* condition: client socket fd connects peer socket */
@@ -154,58 +159,152 @@ int read_from_client(int cfd)
 
     return 1;
 }
+#endif
 
-int 
-main(int argc, char *argv[])
+
+void setup_client_connect(int * pconnfd)
 {
-    int cfd, epfd;
-    struct epoll_event ev, events[20];
-    int nfound;
-    protocol_t * pprotocol;
+    struct sockaddr_in serv_addr;
 
-    client_sock_init(&cfd);
+    *pconnfd = socket(AF_INET, SOCK_STREAM, 0);
+    if (-1 == *pconnfd)
+    {
+        perror("socket creating failed");
+        exit(EXIT_FAILURE);
+    }
+    serv_addr.sin_family = AF_INET;
+    serv_addr.sin_port = htons(SERVER_PORT);
+    if (0 == inet_pton(AF_INET, SERVER_ADDR, &serv_addr.sin_addr))
+    {
+        fprintf(stderr, "server address converting failed");
+        close(*pconnfd);
+        exit(EXIT_FAILURE); 
+    }
+
+    if (-1 == connect(*pconnfd, (struct sockaddr *) &serv_addr, sizeof(serv_addr)))
+    {
+        perror("server connecting failed");
+        close(*pconnfd);
+        exit(EXIT_FAILURE);
+    }
+}
+
+void rdev_add(int epfd, int fd)
+{
+    struct epoll_event ev;
+    ev.events = EPOLLIN;
+    ev.data.fd = fd;
+
+    if (-1 == epoll_ctl(epfd, EPOLL_CTL_ADD, fd, &ev))
+    {
+        perror("epoll adding failed");
+        exit(EXIT_FAILURE);
+    }
+}
+
+msgprot_t * message_pack(char * msg)
+{
+    msgprot_t * pmsgprot = malloc(sizeof(msgprot_t) + strlen(msg));
+    pmsgprot->length = strlen(msg);
+    memcpy(pmsgprot->msgp, msg, strlen(msg));
+    return pmsgprot;
+}
+
+/* 返回消息长度 */
+int message_unpack(int connfd, char ** pmsg, size_t size)
+{
+        *pmsg = malloc(size + 1);
+        int rlen = read(connfd, *pmsg, size);
+        (*pmsg)[rlen] = '\0';
+        if (rlen <= 0)
+        {
+            perror("message reading failed");
+        }
+        return rlen;
+}
+
+
+void send_message_server(msgprot_t * pmsgprot, int connfd)
+{
+    if (write(connfd, pmsgprot, sizeof(msgprot_t) + pmsgprot->length) < 0)
+    {
+        perror("writing to descriptor failed");
+        close(connfd);
+        exit(EXIT_FAILURE);
+    }
+}
+
+void send_message_private()
+{
+
+}
+
+char * accept_message(int connfd)
+{
+    msgprot_t msgprot;
+    char * pmsg;
+
+    read(connfd, &msgprot, sizeof(msgprot_t));
+    message_unpack(connfd, &pmsg, msgprot.length);
+
+    return pmsg;
+}
+
+int main(int argc, char *argv[])
+{
+    int connfd, epfd;
+    struct epoll_event events[2];
+    int ev_avail = 0; /* event ready */
+    char buffer_out[BUFFER_SZ];
+    char * buffer_in = NULL;
+    msgprot_t * pmsgprot = NULL;
+
+    setup_client_connect(&connfd);
+
     epfd = epoll_create(20);
-    perror("epoll_create()");
+    if (-1 == epfd)
+    {
+        perror("epoll creating failed");
+        close(connfd);
+        exit(EXIT_FAILURE); 
+    }
 
-    ev.events = EPOLLIN;
-    ev.data.fd = cfd;
-    epoll_ctl(epfd, EPOLL_CTL_ADD, cfd, &ev);
-    perror("epoll_ctl()");
-
-    /* 把 stdin 加入到 epoll */
-    ev.events = EPOLLIN;
-    ev.data.fd = 0;
-    epoll_ctl(epfd, EPOLL_CTL_ADD, 0, &ev);
-
-    printf("DEBUG read()\n");
+    rdev_add(epfd, connfd);
+    rdev_add(epfd, STDIN_FILENO); /* 让 epoll 监控 STDIN 的读 */
 
     while (1)
     {
-        printf("DEBUG epoll_wait() ...\n");
-        nfound = epoll_wait(epfd, events, 20, -1);
-        perror("epoll_wait()");
+        ev_avail = epoll_wait(epfd, events, 2, -1);
 
-        for (int i = 0; i < nfound; i++)
+        /* 超时向客户端发送消息，证明自己活着 */
+        if (0 == ev_avail)
         {
-            // Check inputs of client
-            if (0 == events[i].data.fd)
+            continue;
+        }
+
+        for (int i = 0; i < ev_avail; i++)
+        {
+            if (events[i].data.fd == STDIN_FILENO) /* 终端输入发送到服务端 */
             {
-                pprotocol = provide_message();
-                write_to_server(cfd, pprotocol);
+                s_gets(buffer_out, BUFFER_SZ);
+                printf("[DEBUG] buffer_out: %s\n", buffer_out);
+                pmsgprot = message_pack(buffer_out);
+                if (!strcmp(buffer_out, "/quit"))
+                {
+                    printf("[DEBUG] close ...\n");
+                    close(connfd);
+                    exit(EXIT_FAILURE);
+                }
+                send_message_server(pmsgprot, connfd);
             }
-            else // Check received from server
+            else /* 从服务端读入数据 */
             {
-                read_from_client(events[i].data.fd);
+                buffer_in = accept_message(connfd);
+                printf("%s", buffer_in);
             }
         }
     }
-
-    /* while (1) */
-    /* { */
-    /*     pprotocol = provide_message(); */
-    /*     write_to_server(cfd, pprotocol); */
-    /*     read_from_server(cfd, pprotocol); */
-    /* } */
-
+    printf("[DEBUG] close ...\n");
+    close(connfd);
     return 0;
 }

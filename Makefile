@@ -1,5 +1,5 @@
 objects =
-CFLAGS = -Wall
+CFLAGS = -Wall -pthread
 CC=gcc
 
 all: server client
