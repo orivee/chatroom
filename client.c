@@ -287,6 +287,8 @@ int main(int argc, char *argv[])
             if (events[i].data.fd == STDIN_FILENO) /* 终端输入发送到服务端 */
             {
                 s_gets(buffer_out, BUFFER_SZ);
+                if (0 == strlen(buffer_out)) /* 不处理直接回车的 buffer */
+                    break;
                 printf("[DEBUG] buffer_out: %s\n", buffer_out);
                 pmsgprot = message_pack(buffer_out);
                 if (!strcmp(buffer_out, "/quit"))
