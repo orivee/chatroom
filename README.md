@@ -33,12 +33,36 @@ TCP:
 
 [^1]: [What is the difference between stdin and STDIN_FILENO?](https://stackoverflow.com/q/15102992/3737970)
 
-** 方案 2：**
+**方案 2：**
 
 在客户端见一个消息列表，在需要的读的时候读取这个列表。也可以把已读消息放到消息历史列表中，而不销毁消息。
+
+----
 
 **问题 2：** 如何实现心跳机制？
 
 **方案 1：**
 
 服务端使用多线程，线程阻塞在 `read()`。客户端使用 epoll，设置超时后，主动向服务端发送一个消息，表明自己活着。当服务端读取失败后（`read() <= 0`），从在线列表中删除此客户端。
+
+**方案 2：**
+
+服务端采用 `select` 或者 `epoll`，在客户端结构体（`client_t`）加入一个字段（如 `is_live`），在用户接入时初始化为某个值（如 `9`）。开辟一个线程，让 `is_live` 字段每隔 1 秒减 1；而每当客户端有输入传入重新赋值 `is_live` 的值为 `9`。
+
+客户端需要设置超时主动发送一个数据给服务端，这样表明自己还活着。
+
+----
+
+**问题 3：** 如何检查 mutex 是否被当前进程加锁了？
+
+**方案：**
+
+```c
+#include <pthread.h>
+#include <errno.h>
+
+if (EBUSY == pthread_mutex_trylock(&clients_mutex))
+    pthread_mutex_unlock(&clients_mutex);
+```
+
+----
