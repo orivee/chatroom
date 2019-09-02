@@ -23,7 +23,7 @@ TCP:
 
 **问题 1：** 如何实现客户端既能从服务端读取消息，也能接受终端输入发往服务器的消息？
 
-**方案：**
+**方案 1：**
 
 把 `STDIN_FILENO` [^1] 也加入 epoll 监控中去。
 
@@ -32,3 +32,7 @@ TCP:
 参考：[amonmoce/ChatRoom](https://github.com/amonmoce/ChatRoom)
 
 [^1]: [What is the difference between stdin and STDIN_FILENO?](https://stackoverflow.com/q/15102992/3737970)
+
+** 方案 2：**
+
+在客户端见一个消息列表，在需要的读的时候读取这个列表。也可以把已读消息放到消息历史列表中，而不销毁消息。
