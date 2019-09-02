@@ -1,6 +1,7 @@
 #include "commons.h"
 #include <signal.h>
 #include <pthread.h>
+#include <errno.h>
 
 #define BUFFER_SZ 2048
 #define SERVER_ADDR "127.0.0.1"
@@ -104,6 +105,8 @@ void online_add(client_t * pcli)
 
     ponline->next = ol_uids;
     ol_uids = ponline;
+
+    printf("[DEBUG]: add %p | %p\n", ol_uids, ol_uids->next);
     pthread_mutex_unlock(&clients_mutex);
 }
 
@@ -111,16 +114,28 @@ void online_add(client_t * pcli)
 void online_delete(int uid)
 {
     pthread_mutex_lock(&clients_mutex);
-    ol_uids_t pprev = ol_uids, psave;
-    while (pprev->next != NULL)
+    ol_uids_t pnode = ol_uids;
+    if (pnode->client.uid == uid)
     {
-        if ((pprev->next->client).uid == uid)
+        ol_uids = pnode->next;
+        free(pnode);
+        pthread_mutex_unlock(&clients_mutex);
+        return;
+    }
+
+    pnode = pnode->next;
+    ol_uids_t pprev = ol_uids;
+    while (pnode != NULL)
+    {
+        printf("[DEBUG]: delete %p | %p\n", pprev, pprev->next);
+        if (pnode->client.uid == uid)
         {
-            psave = pprev->next;
-            pprev->next = pprev->next->next;
-            free(psave);
+            pprev->next = pnode->next;
+            free(pnode);
             break;
         }
+        pprev = pnode;
+        pnode = pnode->next;
     }
     pthread_mutex_unlock(&clients_mutex);
 }
@@ -152,6 +167,7 @@ msgprot_t * message_pack(char * msg)
 /* 返回消息长度 */
 int message_unpack(int connfd, char ** pmsg, size_t size)
 {
+#include <errno.h>
 
         *pmsg = malloc(size + 1);
         int rlen = read(connfd, *pmsg, size);
@@ -169,6 +185,9 @@ void send_message_self(msgprot_t * pmsgprot, int connfd)
     {
         perror("writing to descriptor failed");
         close(connfd);
+        /* 如果当前进程中 mutex 变量被加锁了， 就在退出前解锁，防止 deadlock*/
+        if (EBUSY == pthread_mutex_trylock(&clients_mutex))
+            pthread_mutex_unlock(&clients_mutex);
         exit(EXIT_FAILURE); 
     }
 }
@@ -183,7 +202,7 @@ int send_message_client(msgprot_t * pmsgprot, int uid)
         {
             if (write(pscan->client.connfd, pmsgprot, sizeof(msgprot_t) + pmsgprot->length) < 0)
             {
-                perror("writing to descriptor failed");
+                perror("fowarding message to client failed");
                 close(pscan->client.connfd);
                 pthread_mutex_unlock(&clients_mutex);
                 return -1; /* 消息发送不成功 */
@@ -195,6 +214,21 @@ int send_message_client(msgprot_t * pmsgprot, int uid)
     }
     pthread_mutex_unlock(&clients_mutex);
     return 1; /* 消息对象不存在 */
+}
+
+void send_active_clients(int connfd)
+{
+    pthread_mutex_lock(&clients_mutex);
+    online_t * pnode = ol_uids;
+    char buffer_out[BUFFER_SZ];
+
+    while (pnode != NULL)
+    {
+        sprintf(buffer_out, "%s (%d)\n", pnode->client.name, pnode->client.uid);
+        send_message_self(message_pack(buffer_out), connfd);
+        pnode = pnode->next;
+    }
+    pthread_mutex_unlock(&clients_mutex);
 }
 
 void * handle_client(void * arg)
@@ -269,7 +303,17 @@ void * handle_client(void * arg)
             }
             else if (!strcmp(command, "/list"))
             {
-
+                send_active_clients(pcli->connfd);
+            }
+            else if (!strcmp(command, "/help"))
+            {
+                strcat(buffer_out, "<< /quit Quit chatroom\n");
+                strcat(buffer_out, "<< /msg <uid> <message> Send message to <uid>\n");
+                strcat(buffer_out, "<< /list Show online clients\n");
+                strcat(buffer_out, "<< /login <uid> <password> Login chatroom with <uid>\n");
+                strcat(buffer_out, "<< /register <password> Register in chatroom\n");
+                strcat(buffer_out, "<< /nick <name> Change nickname\n");
+                send_message_self(message_pack(buffer_out), pcli->connfd);
             }
             else
             {
