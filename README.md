@@ -11,6 +11,14 @@ Makefile:
 
 * [Make: how to continue after a command fails?](https://stackoverflow.com/q/2670130/3737970)
 
+TCP:
+
+* [Message Framing](https://blog.stephencleary.com/2009/04/message-framing.html)
+* [What is a message boundary?](https://stackoverflow.com/q/9563563/3737970)
+* [TCP Message Framing](https://blog.chrisd.info/tcp-message-framing/)
+* [Five pitfalls of Linux sockets programming](https://developer.ibm.com/tutorials/l-sockpit/)
+* [Understanding the Internet: How Messages Flow Through TCP Sockets](https://andrewskotzko.com/understanding-the-internet-how-messages-flow-through-tcp-sockets/)
+
 ## Solution
 
 **问题 1：** 如何实现客户端既能从服务端读取消息，也能接受终端输入发往服务器的消息？
