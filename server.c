@@ -30,6 +30,17 @@ ol_uids_t ol_uids = NULL; /* online list head */
 
 pthread_mutex_t clients_mutex = PTHREAD_MUTEX_INITIALIZER;
 
+char * s_strdup(const char * s)
+{
+    size_t size = strlen(s);
+    char * p = malloc(size);
+    if (p)
+    {
+        memcpy(p, s, size);
+    }
+    return p;
+}
+
 void setup_server_listen(int * plistenfd)
 {
     int status;
@@ -107,6 +118,7 @@ void online_add(client_t * pcli)
     ol_uids = ponline;
 
     printf("[DEBUG]: add %p | %p\n", ol_uids, ol_uids->next);
+    /* printf("[DEBUG]: add %p\n", pcli); */
     pthread_mutex_unlock(&clients_mutex);
 }
 
@@ -136,6 +148,32 @@ void online_delete(int uid)
         }
         pprev = pnode;
         pnode = pnode->next;
+    }
+    pthread_mutex_unlock(&clients_mutex);
+}
+
+void online_modify(int uid, int newuid, const char * newname)
+{
+    pthread_mutex_lock(&clients_mutex);
+    online_t * online = ol_uids;
+    while (online != NULL)
+    {
+        printf("[DEBUG] %p | %p\n", online, online->next);
+        if (online->client.uid == uid)
+        {
+            if (newuid != 0)
+            {
+                online->client.uid = newuid;
+            }
+            if (newname != NULL)
+            {
+                strcpy(online->client.name, newname);
+            }
+            fprintf(stdout, "<< uid %d with name %s modify successfuly\n",
+                    online->client.uid, online->client.name);
+            break;
+        }
+        online = online->next;
     }
     pthread_mutex_unlock(&clients_mutex);
 }
@@ -178,6 +216,7 @@ int message_unpack(int connfd, char ** pmsg, size_t size)
         return rlen;
 }
 
+/* send message to sender */
 void send_message_self(const char * msg, int connfd)
 {
     msgprot_t * pmsgprot = message_pack(msg);
@@ -186,12 +225,13 @@ void send_message_self(const char * msg, int connfd)
         perror("writing to descriptor failed");
         close(connfd);
         /* 如果当前进程中 mutex 变量被加锁了， 就在退出前解锁，防止 deadlock*/
-        if (EBUSY == pthread_mutex_trylock(&clients_mutex))
-            pthread_mutex_unlock(&clients_mutex);
+        /* if (EBUSY == pthread_mutex_trylock(&clients_mutex))*/
+        /*     pthread_mutex_unlock(&clients_mutex);*/
         exit(EXIT_FAILURE); 
     }
 }
 
+/* send message to client */
 int send_message_client(const char * msg, int uid)
 {
     msgprot_t * pmsgprot = message_pack(msg);
@@ -204,7 +244,7 @@ int send_message_client(const char * msg, int uid)
             if (write(pscan->client.connfd, pmsgprot, sizeof(msgprot_t) + pmsgprot->length) < 0)
             {
                 perror("fowarding message to client failed");
-                close(pscan->client.connfd);
+                /* close(pscan->client.connfd); */
                 pthread_mutex_unlock(&clients_mutex);
                 return -1; /* 消息发送不成功 */
             }
@@ -215,6 +255,28 @@ int send_message_client(const char * msg, int uid)
     }
     pthread_mutex_unlock(&clients_mutex);
     return 1; /* 消息对象不存在 */
+}
+
+/* Send message to all clients but the sender */
+void send_message(char * msg, int uid)
+{
+    pthread_mutex_lock(&clients_mutex);
+    online_t * pnode = ol_uids;
+    msgprot_t * pmsgprot = message_pack(msg);
+
+    while (pnode != NULL)
+    {
+        if (pnode->client.uid != uid)
+        {
+            if (write(pnode->client.connfd, pmsgprot, sizeof(msgprot_t) + pmsgprot->length) < 0)
+            {
+                perror("writing to descriptor failed");
+                break;
+            }
+        }
+        pnode = pnode->next;
+    }
+    pthread_mutex_unlock(&clients_mutex);
 }
 
 void send_active_clients(int connfd)
@@ -287,8 +349,7 @@ void * handle_client(void * arg)
                         strcat(buffer_out, "\n");
                         if (1 == send_message_client(buffer_out, uid))
                         {
-                            printf("[DEBUG]");
-                            sprintf(buffer_out, "%d reference is not online\n", uid);
+                            sprintf(buffer_out, "uid %d is not online\n", uid);
                             send_message_self(buffer_out, pcli->connfd);
                         }
                     }
@@ -299,7 +360,7 @@ void * handle_client(void * arg)
                 }
                 else
                 {
-                    send_message_self("<< reference cannot be null\n", pcli->connfd);
+                    send_message_self("<< uid cannot be null\n", pcli->connfd);
                 }
             }
             else if (!strcmp(command, "/list"))
@@ -316,6 +377,101 @@ void * handle_client(void * arg)
                 strcat(buffer_out, "<< /nick      <name> Change nickname\n");
                 send_message_self(buffer_out, pcli->connfd);
             }
+            else if (!strcmp(command, "/login")) /* TODO: */
+            {
+                param = strtok(NULL, " "); /* uid */
+                if (param)
+                {
+                    FILE * fp = fopen("./user.db", "r");
+                    char user[BUFFER_SZ], pwd[32], name[32];
+                    int suid;
+                    int uid = atoi(param); /* TODO: 输入检查 */
+                    while (fgets(user, BUFFER_SZ, fp))
+                    {
+                        sscanf(user, "%d %s %s", &suid, pwd, name);
+                        printf("saved user: %d %s %s\n", uid, pwd, name);
+                        if (suid == uid)
+                        {
+                            param = strtok(NULL, " "); /* pwd */
+                            if (param)
+                            {
+                                if (!strcmp(param, pwd))
+                                {
+                                    online_modify(pcli->uid, uid, name);
+                                    pcli->uid = uid;
+                                    strcpy(pcli->name, name);
+                                    send_message_self("<< login successfully with 100\n", pcli->connfd);
+                                }
+                                else
+                                {
+                                    send_message_self("<< uid and password do not match\n", pcli->connfd);
+                                }
+                            }
+                            else
+                            {
+                                send_message_self("<< password cannot be null\n", pcli->connfd);
+                            }
+                        }
+                    }
+                    /* send_message_self("<< uid not found\n", pcli->connfd); */
+                }
+                else
+                {
+                    send_message_self("<< uid cannot be null\n", pcli->connfd);
+                }
+            }
+            else if (!strcmp(command, "/register"))
+            {
+                FILE * fp = fopen("./user.db", "a+");
+                param = strtok(NULL, " ");
+                if (param)
+                {
+                    fprintf(fp, "%d %s %s\n", pcli->uid, param, pcli->name);
+                    fclose(fp);
+                    sprintf(buffer_out, "<< resgister successfully with %d\n", pcli->uid);
+                    send_message_self(buffer_out, pcli->connfd);
+                }
+                else
+                {
+                    send_message_self("<< password cannot be null\n", pcli->connfd);
+                }
+            }
+            else if (!strcmp(command, "/nick"))
+            {
+                FILE * fp = fopen("./user.db", "r+");
+                char user[BUFFER_SZ], pwd[32], name[32];
+                int uid;
+                param = strtok(NULL, " ");
+                if (param)
+                {
+                    char * oldname = s_strdup(pcli->name);
+                    if (!oldname)
+                    {
+                       perror("cannot allocate memory for name");
+                       continue;
+                    }
+                    online_modify(pcli->uid, 0, param);
+                    strcpy(pcli->name, param);
+                    while (fgets(user, BUFFER_SZ, fp))
+                    {
+                        sscanf(user, "%d %s %s", &uid, pwd, name);
+                        if (uid == pcli->uid)
+                            break;
+                    }
+                    fseek(fp, -strlen(user), SEEK_CUR);
+                    /* perror("fseek()"); */
+                    fprintf(fp, "%d %s %s\n", pcli->uid, pwd, pcli->name);
+                    fseek(fp, 0, SEEK_CUR);
+                    fclose(fp);
+                    sprintf(buffer_out, "<< %s is now konwn as %s\n", oldname, pcli->name);
+                    free(oldname);
+                    send_message_self(buffer_out, pcli->connfd);
+                }
+                else
+                {
+                    send_message_self("<< name cannot be null\n", pcli->connfd);
+                }
+            }
             else
             {
                 send_message_self("<< unkown command\n", pcli->connfd);
@@ -323,13 +479,15 @@ void * handle_client(void * arg)
         }
         else
         {
-            printf("[DEBUG] << accept %s\n", buffer_in);
+            snprintf(buffer_out, sizeof(buffer_out), "[%d] (%s) %s\n", pcli->uid, pcli->name, buffer_in);
+            send_message(buffer_out, pcli->uid);
         }
     }
 
     fprintf(stdout, "<< %s (%d) has left\r\n", pcli->name, pcli->uid);
     online_delete(pcli->uid);
     close(pcli->connfd);
+    free(pcli);
 
     return (void *) EXIT_SUCCESS;
 }
