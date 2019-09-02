@@ -1,4 +1,5 @@
 #include "commons.h"
+#include <signal.h>
 #include <pthread.h>
 
 #define BUFFER_SZ 2048
@@ -48,6 +49,9 @@ void setup_server_listen(int * plistenfd)
         close(*plistenfd);
         exit(EXIT_FAILURE);
     }
+
+    /* ignore SIGPIPE signal */
+    signal(SIGPIPE, SIG_IGN);
 
     /* bind */
     status = bind(*plistenfd, (struct sockaddr *) &serv_addr, sizeof(serv_addr));
