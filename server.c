@@ -169,9 +169,28 @@ void send_message_self(msgprot_t * pmsgprot, int connfd)
     }
 }
 
-void send_message_client(msgprot_t * pmsgprot, int connfd)
+int send_message_client(msgprot_t * pmsgprot, int uid)
 {
-
+    pthread_mutex_lock(&clients_mutex);
+    online_t * pscan = ol_uids ;
+    while (pscan != NULL)
+    {
+        if (pscan->client.uid == uid)
+        {
+            if (write(pscan->client.connfd, pmsgprot, sizeof(msgprot_t) + pmsgprot->length) < 0)
+            {
+                perror("writing to descriptor failed");
+                close(pscan->client.connfd);
+                pthread_mutex_unlock(&clients_mutex);
+                return -1; /* 消息发送不成功 */
+            }
+            pthread_mutex_unlock(&clients_mutex);
+            return 0; /* 消息发送成功 */
+        }
+        pscan = pscan->next;
+    }
+    pthread_mutex_unlock(&clients_mutex);
+    return 1; /* 消息对象不存在 */
 }
 
 void * handle_client(void * arg)
@@ -211,6 +230,43 @@ void * handle_client(void * arg)
             {
                 break;
             }
+            else if (!strcmp(command, "/msg"))
+            {
+                param = strtok(NULL, " ");
+                if (param)
+                {
+                    int uid = atoi(param); /* TODO: 添加输入检查 */
+                    param = strtok(NULL, " ");
+                    if (param)
+                    {
+                        sprintf(buffer_out, "[PM] [%s (%d)] ", pcli->name, pcli->uid);
+                        while (param != NULL)
+                        {
+                            strcat(buffer_out, param);
+                            param = strtok(NULL, " ");
+                        }
+                        strcat(buffer_out, "\n");
+                        if (1 == send_message_client(message_pack(buffer_out), uid))
+                        {
+                            printf("[DEBUG]");
+                            sprintf(buffer_out, "%d reference is not online\n", uid);
+                            send_message_self(message_pack(buffer_out), pcli->connfd);
+                        }
+                    }
+                    else
+                    {
+                        send_message_self(message_pack("<< message cannot be null\n"), pcli->connfd);
+                    }
+                }
+                else
+                {
+                    send_message_self(message_pack("<< reference cannot be null\n"), pcli->connfd);
+                }
+            }
+            else if (!strcmp(command, "/list"))
+            {
+
+            }
             else
             {
                 send_message_self(message_pack("<< unkown command\n"), pcli->connfd);
@@ -222,7 +278,7 @@ void * handle_client(void * arg)
         }
     }
 
-    fprintf(stdout, "<< %s has left\r\n", pcli->name);
+    fprintf(stdout, "<< %s (%d) has left\r\n", pcli->name, pcli->uid);
     online_delete(pcli->uid);
     close(pcli->connfd);
 
