@@ -141,6 +141,7 @@ void online_delete(int uid)
 }
 
 /* Print ip address */
+
 void print_client_addr(struct sockaddr_in addr)
 {
     char addr_str[INET_ADDRSTRLEN];
@@ -156,7 +157,7 @@ char * read_client(int connfd, int len)
     return buffer_in;
 }
 
-msgprot_t * message_pack(char * msg)
+msgprot_t * message_pack(const char * msg)
 {
     msgprot_t * pmsgprot = malloc(sizeof(msgprot_t) + strlen(msg));
     pmsgprot->length = strlen(msg);
@@ -167,8 +168,6 @@ msgprot_t * message_pack(char * msg)
 /* 返回消息长度 */
 int message_unpack(int connfd, char ** pmsg, size_t size)
 {
-#include <errno.h>
-
         *pmsg = malloc(size + 1);
         int rlen = read(connfd, *pmsg, size);
         (*pmsg)[rlen] = '\0';
@@ -179,8 +178,9 @@ int message_unpack(int connfd, char ** pmsg, size_t size)
         return rlen;
 }
 
-void send_message_self(msgprot_t * pmsgprot, int connfd)
+void send_message_self(const char * msg, int connfd)
 {
+    msgprot_t * pmsgprot = message_pack(msg);
     if (write(connfd, pmsgprot, sizeof(msgprot_t) + pmsgprot->length) < 0)
     {
         perror("writing to descriptor failed");
@@ -192,8 +192,9 @@ void send_message_self(msgprot_t * pmsgprot, int connfd)
     }
 }
 
-int send_message_client(msgprot_t * pmsgprot, int uid)
+int send_message_client(const char * msg, int uid)
 {
+    msgprot_t * pmsgprot = message_pack(msg);
     pthread_mutex_lock(&clients_mutex);
     online_t * pscan = ol_uids ;
     while (pscan != NULL)
@@ -225,7 +226,7 @@ void send_active_clients(int connfd)
     while (pnode != NULL)
     {
         sprintf(buffer_out, "%s (%d)\n", pnode->client.name, pnode->client.uid);
-        send_message_self(message_pack(buffer_out), connfd);
+        send_message_self(buffer_out, connfd);
         pnode = pnode->next;
     }
     pthread_mutex_unlock(&clients_mutex);
@@ -284,21 +285,21 @@ void * handle_client(void * arg)
                             param = strtok(NULL, " ");
                         }
                         strcat(buffer_out, "\n");
-                        if (1 == send_message_client(message_pack(buffer_out), uid))
+                        if (1 == send_message_client(buffer_out, uid))
                         {
                             printf("[DEBUG]");
                             sprintf(buffer_out, "%d reference is not online\n", uid);
-                            send_message_self(message_pack(buffer_out), pcli->connfd);
+                            send_message_self(buffer_out, pcli->connfd);
                         }
                     }
                     else
                     {
-                        send_message_self(message_pack("<< message cannot be null\n"), pcli->connfd);
+                        send_message_self("<< message cannot be null\n", pcli->connfd);
                     }
                 }
                 else
                 {
-                    send_message_self(message_pack("<< reference cannot be null\n"), pcli->connfd);
+                    send_message_self("<< reference cannot be null\n", pcli->connfd);
                 }
             }
             else if (!strcmp(command, "/list"))
@@ -307,17 +308,17 @@ void * handle_client(void * arg)
             }
             else if (!strcmp(command, "/help"))
             {
-                strcat(buffer_out, "<< /quit Quit chatroom\n");
-                strcat(buffer_out, "<< /msg <uid> <message> Send message to <uid>\n");
-                strcat(buffer_out, "<< /list Show online clients\n");
-                strcat(buffer_out, "<< /login <uid> <password> Login chatroom with <uid>\n");
-                strcat(buffer_out, "<< /register <password> Register in chatroom\n");
-                strcat(buffer_out, "<< /nick <name> Change nickname\n");
-                send_message_self(message_pack(buffer_out), pcli->connfd);
+                strcat(buffer_out, "<< /quit      Quit chatroom\n");
+                strcat(buffer_out, "<< /msg       <uid> <message> Send message to <uid>\n");
+                strcat(buffer_out, "<< /list      Show online clients\n");
+                strcat(buffer_out, "<< /login     <uid> <password> Login chatroom with <uid>\n");
+                strcat(buffer_out, "<< /register  <password> Register in chatroom\n");
+                strcat(buffer_out, "<< /nick      <name> Change nickname\n");
+                send_message_self(buffer_out, pcli->connfd);
             }
             else
             {
-                send_message_self(message_pack("<< unkown command\n"), pcli->connfd);
+                send_message_self("<< unkown command\n", pcli->connfd);
             }
         }
         else
