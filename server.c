@@ -417,8 +417,9 @@ void * handle_client(void * arg)
                 strcat(buffer_out, "<< /msg       <uid> <message> Send message to <uid>\n");
                 strcat(buffer_out, "<< /list      Show online clients\n");
                 strcat(buffer_out, "<< /login     <uid> <password> Login chatroom with <uid>\n");
-                strcat(buffer_out, "<< /register  <password> [name] Register with name in chatroom\n");
+                strcat(buffer_out, "<< /register  <password> [name] Register with name\n");
                 strcat(buffer_out, "<< /nick      <name> Change nickname\n");
+                strcat(buffer_out, "<< /pwd       <password> Reset password\n");
                 send_message_self(buffer_out, pcli->connfd);
             }
             else if (!strcmp(command, "/login"))
@@ -483,6 +484,16 @@ void * handle_client(void * arg)
                 sprintf(buffer_out, "<< %s is now konwn as %s\n", oldname, pcli->name);
                 free(oldname);
                 send_message_self(buffer_out, pcli->connfd);
+            }
+            else if (!strcmp(command, "/pwd"))
+            {
+                param1 = strtok(NULL, " ");
+                if (param1 == NULL)
+                {
+                    send_message_self("<< name cannot be null\n", pcli->connfd);
+                }
+                modify_pwd_name(pcli->uid, param1, NULL); /* TODO: 错误检查 */
+                send_message_self("<< reset password successfully\n", pcli->connfd);
             }
             else
             {
