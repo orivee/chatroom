@@ -310,9 +310,33 @@ void save_uid_pwd(const int uid, const char * pwd, const char * name)
     fclose(fp);
 }
 
-void modify_uid_pwd(const int uid, const char * pwd, const char * name)
+void modify_pwd_name(const int uid, const char * pwd, const char * name)
 {
+    char fuser[BUFFER_SZ], fpwd[32], fname[32];/* TODO: 错误检查 */
+    int fuid;
 
+    FILE * fp = fopen("./users.db", "r+");
+    while (fgets(fuser, BUFFER_SZ, fp)) /* stop after an EOF or a newline */
+    {
+        sscanf(fuser, "%d %s %s", &fuid, fpwd, fname);
+        if (uid == fuid)
+            break;
+    }
+    fseek(fp, -strlen(fuser), SEEK_CUR);
+    if (pwd == NULL && name != NULL)
+    {
+        fprintf(fp, "%d %s %s", fuid, fpwd, name);
+    }
+    else if (name == NULL && pwd != NULL)
+    {
+        fprintf(fp, "%d %s %s", fuid, pwd, fname);
+    }
+    else if (name != NULL && pwd != NULL)
+    {
+        fprintf(fp, "%d %s %s", fuid, pwd, name);
+    }
+    fseek(fp, 0, SEEK_CUR);
+    fclose(fp);
 }
 
 void * handle_client(void * arg)
@@ -429,45 +453,29 @@ void * handle_client(void * arg)
                     send_message_self("<< password cannot be null\n", pcli->connfd);
                 }
 
-                save_uid_pwd(pcli->uid, param1, param2);
+                save_uid_pwd(pcli->uid, param1, param2); /* TODO: 错误检查 */
                 sprintf(buffer_out, "<< resgister successfully with %d\n", pcli->uid);
                 send_message_self(buffer_out, pcli->connfd);
             }
             else if (!strcmp(command, "/nick"))
             {
-                FILE * fp = fopen("./user.db", "r+");
-                char user[BUFFER_SZ], pwd[32], name[32];
-                int uid;
-                param = strtok(NULL, " ");
-                if (param)
-                {
-                    char * oldname = s_strdup(pcli->name);
-                    if (!oldname)
-                    {
-                       perror("cannot allocate memory for name");
-                       continue;
-                    }
-                    online_modify(pcli->uid, 0, param);
-                    strcpy(pcli->name, param);
-                    while (fgets(user, BUFFER_SZ, fp))
-                    {
-                        sscanf(user, "%d %s %s", &uid, pwd, name);
-                        if (uid == pcli->uid)
-                            break;
-                    }
-                    fseek(fp, -strlen(user), SEEK_CUR);
-                    /* perror("fseek()"); */
-                    fprintf(fp, "%d %s %s\n", pcli->uid, pwd, pcli->name);
-                    fseek(fp, 0, SEEK_CUR);
-                    fclose(fp);
-                    sprintf(buffer_out, "<< %s is now konwn as %s\n", oldname, pcli->name);
-                    free(oldname);
-                    send_message_self(buffer_out, pcli->connfd);
-                }
-                else
+                param1 = strtok(NULL, " ");
+                if (param1 == NULL)
                 {
                     send_message_self("<< name cannot be null\n", pcli->connfd);
                 }
+                char * oldname = s_strdup(pcli->name);
+                if (!oldname)
+                {
+                    perror("cannot allocate memory for name");
+                    continue;
+                }
+                modify_pwd_name(pcli->uid, NULL, param1); /* TODO: 错误检查 */
+                online_modify(pcli->uid, 0, param1);
+                strcpy(pcli->name, param1);
+                sprintf(buffer_out, "<< %s is now konwn as %s\n", oldname, pcli->name);
+                free(oldname);
+                send_message_self(buffer_out, pcli->connfd);
             }
             else
             {
