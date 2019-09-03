@@ -12,6 +12,7 @@ Makefile:
 * [Make: how to continue after a command fails?](https://stackoverflow.com/q/2670130/3737970)
 * [How to use LDFLAGS in makefile](https://stackoverflow.com/q/13249610/3737970)
 * [Building And Using Static And Shared "C" Libraries](http://docencia.ac.upc.edu/FIB/USO/Bibliografia/unix-c-libraries.html)
+* [Practical Makefiles, by example](http://nuclear.mutantstargoat.com/articles/make/)
 
 TCP:
 
@@ -107,7 +108,7 @@ int main()
 >>>
 **Input followed by output requires seeks**
 
-The `fseek(ft, 0, SEEK_CUR);` statement is required by the C standard.<Paste>
+The `fseek(ft, 0, SEEK_CUR);` statement is required by the C standard.
 >>>
 
 [^2]: [modify existing contents of file in c](https://stackoverflow.com/q/21958155/3737970)
