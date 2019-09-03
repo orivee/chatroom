@@ -1,17 +1,17 @@
 objects =
 CFLAGS = -Wall -pthread
+LDFLAGS = -pthread
 CC=gcc
 
 all: server client
 .PHONEY: all
 
-# server: server.o
+server: server.o msgprot.o
+client: client.o msgprot.o
 
-server: server.c
-
-# client: client.o
-
-client: client.c
+server.o: server.c
+client.o: client.c
+msgprot.o: msgprot.c
 
 .PHONEY: clean
 clean:

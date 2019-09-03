@@ -4,6 +4,7 @@
 #include <errno.h>
 
 #define BUFFER_SZ 2048
+#define STRMAX 31;
 #define SERVER_ADDR "127.0.0.1"
 #define SERVER_PORT 7000
 #define BACKLOG 5
@@ -178,42 +179,13 @@ void online_modify(int uid, int newuid, const char * newname)
     pthread_mutex_unlock(&clients_mutex);
 }
 
-/* Print ip address */
+/* print client info */
 
 void print_client_addr(struct sockaddr_in addr)
 {
     char addr_str[INET_ADDRSTRLEN];
     inet_ntop(AF_INET, (void *) &addr.sin_addr, addr_str, sizeof(addr_str));
     printf("%s:%d", addr_str, ntohs(addr.sin_port));
-}
-
-char * read_client(int connfd, int len)
-{
-    char * buffer_in = malloc(1024);
-    read(connfd, buffer_in, 1024);
-
-    return buffer_in;
-}
-
-msgprot_t * message_pack(const char * msg)
-{
-    msgprot_t * pmsgprot = malloc(sizeof(msgprot_t) + strlen(msg));
-    pmsgprot->length = strlen(msg);
-    memcpy(pmsgprot->msgp, msg, strlen(msg));
-    return pmsgprot;
-}
-
-/* 返回消息长度 */
-int message_unpack(int connfd, char ** pmsg, size_t size)
-{
-        *pmsg = malloc(size + 1);
-        int rlen = read(connfd, *pmsg, size);
-        (*pmsg)[rlen] = '\0';
-        if (rlen <= 0)
-        {
-            perror("message reading failed");
-        }
-        return rlen;
 }
 
 /* send message to sender */
@@ -294,6 +266,36 @@ void send_active_clients(int connfd)
     pthread_mutex_unlock(&clients_mutex);
 }
 
+/* verify uid and password */
+/* 0: login successfully 1: uid and password not match; */
+/* -1: uid not found */
+int verify_uid_pwd(const int uid, const char * pwd, char * name)
+{
+    char fuser[BUFFER_SZ], fpwd[32], fname[32];
+    int fuid;
+
+    FILE * fp = fopen("./users.db", "r");
+    while (fgets(fuser, BUFFER_SZ, fp)) /* stop after an EOF or a newline */
+    {
+        sscanf(fuser, "%d %s %s", &fuid, fpwd, fname);
+        printf("saved user: %d %s %s\n", uid, pwd, name);
+        if (fuid == uid)
+        {
+            if (!strcmp(fpwd, pwd))
+            {
+                strcpy(name, fname);
+                return 0; /* login successfully */
+            }
+            else
+            {
+                return 1; /* uid and pwd not match */
+            }
+        }
+    }
+
+    return -1; /* uid not found*/
+}
+
 void * handle_client(void * arg)
 {
     char buffer_out[BUFFER_SZ];
@@ -324,7 +326,7 @@ void * handle_client(void * arg)
 
         if (buffer_in[0] == '/')
         {
-            char * command, * param;
+            char * command, * param1, * param2;
             command = strtok(buffer_in, " ");
             printf("command: %s\n", command);
             if (!strcmp(command, "/quit"))
@@ -333,34 +335,26 @@ void * handle_client(void * arg)
             }
             else if (!strcmp(command, "/msg"))
             {
-                param = strtok(NULL, " ");
-                if (param)
+                param1 = strtok(NULL, " ");
+                param2 = strtok(NULL, " ");
+                if (param1 == NULL || param2 == NULL)
                 {
-                    int uid = atoi(param); /* TODO: 添加输入检查 */
-                    param = strtok(NULL, " ");
-                    if (param)
-                    {
-                        sprintf(buffer_out, "[PM] [%s (%d)] ", pcli->name, pcli->uid);
-                        while (param != NULL)
-                        {
-                            strcat(buffer_out, param);
-                            param = strtok(NULL, " ");
-                        }
-                        strcat(buffer_out, "\n");
-                        if (1 == send_message_client(buffer_out, uid))
-                        {
-                            sprintf(buffer_out, "uid %d is not online\n", uid);
-                            send_message_self(buffer_out, pcli->connfd);
-                        }
-                    }
-                    else
-                    {
-                        send_message_self("<< message cannot be null\n", pcli->connfd);
-                    }
+                    send_message_self("<< uid or message cannot be null\n", pcli->connfd);
+                    continue;
                 }
-                else
+
+                int uid = atoi(param1); /* 检查 */
+                sprintf(buffer_out, "[PM] [%s (%d)] ", pcli->name, pcli->uid);
+                while (param2 != NULL)
                 {
-                    send_message_self("<< uid cannot be null\n", pcli->connfd);
+                    strcat(buffer_out, param2);
+                    param2 = strtok(NULL, " ");
+                }
+                strcat(buffer_out, "\n");
+                if (1 == send_message_client(buffer_out, uid))
+                {
+                    sprintf(buffer_out, "uid %d is not online\n", uid);
+                    send_message_self(buffer_out, pcli->connfd);
                 }
             }
             else if (!strcmp(command, "/list"))
@@ -377,49 +371,37 @@ void * handle_client(void * arg)
                 strcat(buffer_out, "<< /nick      <name> Change nickname\n");
                 send_message_self(buffer_out, pcli->connfd);
             }
-            else if (!strcmp(command, "/login")) /* TODO: */
+            else if (!strcmp(command, "/login"))
             {
-                param = strtok(NULL, " "); /* uid */
-                if (param)
+                param1 = strtok(NULL, " "); /* uid */
+                param2 = strtok(NULL, " "); /* pwd */
+                if (param1 == NULL || param2 == NULL)
                 {
-                    FILE * fp = fopen("./user.db", "r");
-                    char user[BUFFER_SZ], pwd[32], name[32];
-                    int suid;
-                    int uid = atoi(param); /* TODO: 输入检查 */
-                    while (fgets(user, BUFFER_SZ, fp))
-                    {
-                        sscanf(user, "%d %s %s", &suid, pwd, name);
-                        printf("saved user: %d %s %s\n", uid, pwd, name);
-                        if (suid == uid)
-                        {
-                            param = strtok(NULL, " "); /* pwd */
-                            if (param)
-                            {
-                                if (!strcmp(param, pwd))
-                                {
-                                    online_modify(pcli->uid, uid, name);
-                                    pcli->uid = uid;
-                                    strcpy(pcli->name, name);
-                                    send_message_self("<< login successfully with 100\n", pcli->connfd);
-                                }
-                                else
-                                {
-                                    send_message_self("<< uid and password do not match\n", pcli->connfd);
-                                }
-                            }
-                            else
-                            {
-                                send_message_self("<< password cannot be null\n", pcli->connfd);
-                            }
-                        }
-                    }
-                    /* send_message_self("<< uid not found\n", pcli->connfd); */
+                    send_message_self("<< uid or password cannot be null\n", pcli->connfd);
+                    continue;
+                }
+
+                int uid = atoi(param1); /* TODO: 输入检查 */
+
+                int status = verify_uid_pwd(uid, param2, pcli->name);
+                if (0 == status)
+                {
+                    online_modify(pcli->uid, uid, pcli->name); /* 需要修改在线列表中的 uid 和 name，列表 client_t 是复制了一份 */
+                    pcli->uid = uid; /* 修改完列表，再修改当前 client_t 信息 */
+                    sprintf(buffer_out, "<< login successfully with %s (%d)\n", pcli->name, pcli->uid);
+                    send_message_self(buffer_out, pcli->connfd);
+                }
+                else if (1 == status)
+                {
+                    send_message_self("<< uid and password do not match\n", pcli->connfd);
                 }
                 else
                 {
-                    send_message_self("<< uid cannot be null\n", pcli->connfd);
+                    send_message_self("<< uid not found\n", pcli->connfd);
                 }
+
             }
+#if 0
             else if (!strcmp(command, "/register"))
             {
                 FILE * fp = fopen("./user.db", "a+");
@@ -472,6 +454,7 @@ void * handle_client(void * arg)
                     send_message_self("<< name cannot be null\n", pcli->connfd);
                 }
             }
+#endif
             else
             {
                 send_message_self("<< unkown command\n", pcli->connfd);

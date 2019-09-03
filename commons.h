@@ -9,11 +9,6 @@
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <sys/epoll.h>
-
-typedef struct msgprot
-{
-    uint32_t length; /* 发送消息的长度 */
-    char * msgp[0];
-} msgprot_t;
+#include "msgprot.h"
 
 #endif
