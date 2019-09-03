@@ -296,6 +296,25 @@ int verify_uid_pwd(const int uid, const char * pwd, char * name)
     return -1; /* uid not found*/
 }
 
+void save_uid_pwd(const int uid, const char * pwd, const char * name)
+{
+    FILE * fp = fopen("./users.db", "a+");
+    if (name)
+    {
+        fprintf(fp, "%d %s %s\n", uid, pwd, name);
+    }
+    else
+    {
+        fprintf(fp, "%d %s %s\n", uid, pwd, "annoymous");
+    }
+    fclose(fp);
+}
+
+void modify_uid_pwd(const int uid, const char * pwd, const char * name)
+{
+
+}
+
 void * handle_client(void * arg)
 {
     char buffer_out[BUFFER_SZ];
@@ -367,7 +386,7 @@ void * handle_client(void * arg)
                 strcat(buffer_out, "<< /msg       <uid> <message> Send message to <uid>\n");
                 strcat(buffer_out, "<< /list      Show online clients\n");
                 strcat(buffer_out, "<< /login     <uid> <password> Login chatroom with <uid>\n");
-                strcat(buffer_out, "<< /register  <password> Register in chatroom\n");
+                strcat(buffer_out, "<< /register  <password> [name] Register with name in chatroom\n");
                 strcat(buffer_out, "<< /nick      <name> Change nickname\n");
                 send_message_self(buffer_out, pcli->connfd);
             }
@@ -401,22 +420,18 @@ void * handle_client(void * arg)
                 }
 
             }
-#if 0
             else if (!strcmp(command, "/register"))
             {
-                FILE * fp = fopen("./user.db", "a+");
-                param = strtok(NULL, " ");
-                if (param)
-                {
-                    fprintf(fp, "%d %s %s\n", pcli->uid, param, pcli->name);
-                    fclose(fp);
-                    sprintf(buffer_out, "<< resgister successfully with %d\n", pcli->uid);
-                    send_message_self(buffer_out, pcli->connfd);
-                }
-                else
+                param1 = strtok(NULL, " ");
+                param2 = strtok(NULL, " ");
+                if (param1 == NULL)
                 {
                     send_message_self("<< password cannot be null\n", pcli->connfd);
                 }
+
+                save_uid_pwd(pcli->uid, param1, param2);
+                sprintf(buffer_out, "<< resgister successfully with %d\n", pcli->uid);
+                send_message_self(buffer_out, pcli->connfd);
             }
             else if (!strcmp(command, "/nick"))
             {
@@ -454,7 +469,6 @@ void * handle_client(void * arg)
                     send_message_self("<< name cannot be null\n", pcli->connfd);
                 }
             }
-#endif
             else
             {
                 send_message_self("<< unkown command\n", pcli->connfd);
@@ -485,7 +499,7 @@ int main(int argc, char * argv[])
 
     /* read user database */
     /* TODO: func */
-    uid = 10;
+    uid = 200;
 
     setup_server_listen(&listenfd);
 
