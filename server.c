@@ -4,13 +4,20 @@
 #include <errno.h>
 
 #define BUFFER_SZ 2048
-#define STRMAX 31;
+#define STRMAX 31
 #define SERVER_ADDR "127.0.0.1"
 #define SERVER_PORT 7000
 #define BACKLOG 5
 #define EVMAX 100
 
 static int uid = 0;
+
+/* user info structure */
+typedef struct {
+    int uid;
+    char name[STRMAX];
+    char passwd[STRMAX];
+} user_info_t;
 
 /* client structure */
 typedef struct {
@@ -271,19 +278,17 @@ void send_active_clients(int connfd)
 /* -1: uid not found */
 int verify_uid_pwd(const int uid, const char * pwd, char * name)
 {
-    char fuser[BUFFER_SZ], fpwd[32], fname[32];
-    int fuid;
+    user_info_t user_info;
 
-    FILE * fp = fopen("./users.db", "r");
-    while (fgets(fuser, BUFFER_SZ, fp)) /* stop after an EOF or a newline */
+    FILE * fp = fopen("./users.db", "rb");
+    while (fread(&user_info, sizeof(user_info_t), 1, fp)) /* stop after an EOF or a newline */
     {
-        sscanf(fuser, "%d %s %s", &fuid, fpwd, fname);
-        printf("saved user: %d %s %s\n", uid, pwd, name);
-        if (fuid == uid)
+        /* printf("saved user: %d %s %s\n", user_info.uid, user_info.passwd, user_info.name); */
+        if (user_info.uid== uid)
         {
-            if (!strcmp(fpwd, pwd))
+            if (!strcmp(user_info.passwd, pwd))
             {
-                strcpy(name, fname);
+                strcpy(name, user_info.name);
                 return 0; /* login successfully */
             }
             else
@@ -298,43 +303,45 @@ int verify_uid_pwd(const int uid, const char * pwd, char * name)
 
 void save_uid_pwd(const int uid, const char * pwd, const char * name)
 {
-    FILE * fp = fopen("./users.db", "a+");
+    user_info_t user_info;
+    user_info.uid = uid;
+    strcpy(user_info.passwd, pwd);
     if (name)
     {
-        fprintf(fp, "%d %s %s\n", uid, pwd, name);
+        strcpy(user_info.name, name);
     }
     else
     {
-        fprintf(fp, "%d %s %s\n", uid, pwd, "annoymous");
+        strcpy(user_info.name, "annoymous");
     }
+
+    /* printf("saved user: %d %s %s\n", user_info.uid, user_info.passwd, user_info.name); */
+    FILE * fp = fopen("./users.db", "a+b");
+    fwrite(&user_info, sizeof(user_info_t), 1, fp);
     fclose(fp);
 }
 
 void modify_pwd_name(const int uid, const char * pwd, const char * name)
 {
-    char fuser[BUFFER_SZ], fpwd[32], fname[32];/* TODO: 错误检查 */
-    int fuid;
+    user_info_t user_info;
 
-    FILE * fp = fopen("./users.db", "r+");
-    while (fgets(fuser, BUFFER_SZ, fp)) /* stop after an EOF or a newline */
+    FILE * fp = fopen("./users.db", "r+b");
+    while (fread(&user_info, sizeof(user_info_t), 1, fp)) /* stop after an EOF or a newline */
     {
-        sscanf(fuser, "%d %s %s", &fuid, fpwd, fname);
-        if (uid == fuid)
+        /* printf("saved user: %d %s %s\n", user_info.uid, user_info.passwd, user_info.name); */
+        if (user_info.uid == uid)
             break;
     }
-    fseek(fp, -strlen(fuser), SEEK_CUR);
-    if (pwd == NULL && name != NULL)
+    fseek(fp, -sizeof(user_info_t), SEEK_CUR);
+    if (pwd)
     {
-        fprintf(fp, "%d %s %s", fuid, fpwd, name);
+        strcpy(user_info.passwd, pwd);
     }
-    else if (name == NULL && pwd != NULL)
+    if (name)
     {
-        fprintf(fp, "%d %s %s", fuid, pwd, fname);
+        strcpy(user_info.name, name);
     }
-    else if (name != NULL && pwd != NULL)
-    {
-        fprintf(fp, "%d %s %s", fuid, pwd, name);
-    }
+    fwrite(&user_info, sizeof(user_info_t), 1, fp);
     fseek(fp, 0, SEEK_CUR);
     fclose(fp);
 }
