@@ -10,6 +10,8 @@ Program:
 Makefile:
 
 * [Make: how to continue after a command fails?](https://stackoverflow.com/q/2670130/3737970)
+* [How to use LDFLAGS in makefile](https://stackoverflow.com/q/13249610/3737970)
+* [Building And Using Static And Shared "C" Libraries](http://docencia.ac.upc.edu/FIB/USO/Bibliografia/unix-c-libraries.html)
 
 TCP:
 
@@ -66,3 +68,46 @@ if (EBUSY == pthread_mutex_trylock(&clients_mutex))
 ```
 
 ----
+
+**问题 4：** 用 C 修改文件存在的内容
+
+**方案：**
+
+使用 `lseek()` 函数。[^2]
+
+```c
+#include <stdio.h>
+#include <stdlib.h>
+
+int main()
+{
+    FILE *ft;
+    char const *name = "abc.txt";
+    int ch;
+    ft = fopen(name, "r+");
+    if (ft == NULL)
+    {
+        fprintf(stderr, "cannot open target file %s\n", name);
+        exit(1);
+    }
+    while ((ch = fgetc(ft)) != EOF)
+    {
+        if (ch == 'i')
+        {
+            fseek(ft, -1, SEEK_CUR);
+            fputc('a',ft);
+            fseek(ft, 0, SEEK_CUR);
+        }
+    }
+    fclose(ft);
+    return 0;
+}
+```
+
+>>>
+**Input followed by output requires seeks**
+
+The `fseek(ft, 0, SEEK_CUR);` statement is required by the C standard.<Paste>
+>>>
+
+[^2]: [modify existing contents of file in c](https://stackoverflow.com/q/21958155/3737970)
