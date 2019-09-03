@@ -111,4 +111,8 @@ int main()
 The `fseek(ft, 0, SEEK_CUR);` statement is required by the C standard.
 >>>
 
+**不要用于以文本形式打开的文件修改。** 如果写入文件字符串过长，会覆盖掉后面的内容。
+
+写入一个结构体，然后修改结构体，再写入。这样可以。
+
 [^2]: [modify existing contents of file in c](https://stackoverflow.com/q/21958155/3737970)
