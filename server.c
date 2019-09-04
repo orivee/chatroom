@@ -5,8 +5,6 @@
 
 #define BUFFER_SZ 2048
 #define STRMAX 31
-#define SERVER_ADDR "127.0.0.1"
-#define SERVER_PORT 7000
 #define BACKLOG 5
 #define EVMAX 100
 
@@ -47,6 +45,7 @@ ol_uids_t ol_uids = NULL; /* online list head */
 
 pthread_mutex_t clients_mutex = PTHREAD_MUTEX_INITIALIZER;
 
+/* string duplication */
 char * s_strdup(const char * s)
 {
     size_t size = strlen(s);
@@ -58,6 +57,7 @@ char * s_strdup(const char * s)
     return p;
 }
 
+/* parse a row config */
 int parse_line(char * buf)
 {
     if (buf == NULL)
@@ -94,6 +94,7 @@ int parse_line(char * buf)
     return 0;
 }
 
+/* read server config */
 void read_server_config()
 {
     FILE * fp = fopen("./server.conf", "r");
@@ -120,6 +121,22 @@ void read_server_config()
 
     printf("config: addr: %s, port: %d, logfile: %s\n",
             configs.address, configs.port, configs.logfile);
+}
+
+/* uid initialization */
+void uid_init()
+{
+    FILE * fp = fopen("./users.db", "r");
+    user_info_t user_info;
+
+    while (fread(&user_info, sizeof(user_info_t), 1, fp)) /* stop after an EOF or a newline */
+    {
+        /* printf("saved user: %d %s %s\n", user_info.uid, user_info.passwd, user_info.name); */
+        if (user_info.uid > uid)
+            uid = user_info.uid;
+    }
+
+    uid = uid + 1;
 }
 
 void setup_server_listen(int * plistenfd)
@@ -478,6 +495,11 @@ void * handle_client(void * arg)
             }
             else if (!strcmp(command, "/login"))
             {
+                if (1 == is_login)
+                {
+                    send_message_self("<< already login\n", pcli->connfd);
+                    continue;
+                }
                 param1 = strtok(NULL, " "); /* uid */
                 param2 = strtok(NULL, " "); /* pwd */
                 if (param1 == NULL || param2 == NULL)
@@ -630,8 +652,8 @@ int main(int argc, char * argv[])
     read_server_config();
 
     /* read user database */
-    /* TODO: func */
-    uid = 400;
+    uid_init();
+    printf("init uid: %d\n", uid);
 
     setup_server_listen(&listenfd);
 
