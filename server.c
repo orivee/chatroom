@@ -1,4 +1,5 @@
 #include "commons.h"
+#include <getopt.h>
 #include <signal.h>
 #include <pthread.h>
 #include <errno.h>
@@ -12,9 +13,11 @@ static int uid = 0;
 
 /* config structure */
 typedef struct {
+    char config[STRMAX];
     char address[STRMAX];
+    char logpath[STRMAX];
+    int slient;
     int port;
-    char logfile[STRMAX];
 } config_t;
 
 static config_t configs;
@@ -87,7 +90,7 @@ int parse_line(char * buf)
     else if (0 == strcmp(varname, "server_port"))
         configs.port = atoi(value);
     else if (0 == strcmp(varname, "log_file"))
-        strcpy(configs.logfile, value);
+        strcpy(configs.logpath, value);
     else
         return -1;
 
@@ -119,8 +122,8 @@ void read_server_config()
         }
     }
 
-    printf("config: addr: %s, port: %d, logfile: %s\n",
-            configs.address, configs.port, configs.logfile);
+    printf("config: addr: %s, port: %d, logpath: %s\n",
+            configs.address, configs.port, configs.logpath);
 }
 
 /* uid initialization */
@@ -662,6 +665,62 @@ void * handle_client(void * arg)
     return (void *) EXIT_SUCCESS;
 }
 
+void load_arguments(int argc, char ** argv)
+{
+    static struct option long_options[] =
+    {
+        {"help", no_argument, 0, 'h'},
+        {"config", required_argument, 0, 'f'},
+        {"bind_ip", required_argument, 0, 'i'},
+        {"port", required_argument, 0, 'p'},
+        {"logpath", required_argument, 0, 'l'},
+        {"daemon", required_argument, 0, 'd'}
+    };
+
+    int c;
+    int option_index = 0;
+
+    while (1)
+    {
+        c = getopt_long(argc, argv, "hf:p:i:l:d", long_options, &option_index);
+
+        if (-1 == c)
+            break;
+
+        switch (c)
+        {
+            case 'h':
+                printf("Usage: %s [options]\n", argv[0]);
+                printf("options:\n");
+                printf("\t--help, -h\n\t\tshow help information\n");
+                printf("\t--config <filename>, -f <filename>\n\t\tspecify configure file\n");
+                printf("\t--bind_ip <ipaddress>, -i <ipaddress>\n");
+                printf("\t--port <port>, -p <port>\n");
+                printf("\t--logpath <path>\n");
+                printf("\t--daemon, -d\n");
+                exit(EXIT_FAILURE);
+            case 'f':
+                break;
+            case 'p':
+                if (optarg)
+                    configs.port = atoi(optarg);
+                break;
+            case 'i':
+                if (optarg)
+                    strcpy(configs.address, optarg);
+                break;
+            case 'l':
+                if (optarg)
+                    strcpy(configs.logpath, optarg);
+                break;
+            case 'd':
+                break;
+            default:
+                exit(EXIT_FAILURE);
+        }
+    }
+}
+
 int main(int argc, char * argv[])
 {
     int listenfd = 0, connfd = 0;
@@ -670,9 +729,15 @@ int main(int argc, char * argv[])
     /* read server config */
     read_server_config();
 
+    /* load command arguments */
+    load_arguments(argc, argv);
+
+    printf("config: addr: %s, port: %d, logpath: %s\n",
+            configs.address, configs.port, configs.logpath);
+
     /* read user database */
     uid_init();
-    printf("init uid: %d\n", uid);
+    /* printf("init uid: %d\n", uid); */
 
     setup_server_listen(&listenfd);
 
