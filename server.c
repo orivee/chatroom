@@ -425,6 +425,7 @@ void * handle_client(void * arg)
     char * buffer_in;
     msgprot_t msgprot;
     int msglen;
+    int is_login = 0; /* 登入标志 0 未登入；1 登入 */
 
     client_t * pcli = (client_t *) arg;
 
@@ -456,8 +457,57 @@ void * handle_client(void * arg)
             {
                 break;
             }
+            else if (!strcmp(command, "/register"))
+            {
+                param1 = strtok(NULL, " ");
+                param2 = strtok(NULL, " ");
+                if (param1 == NULL)
+                {
+                    send_message_self("<< password cannot be null\n", pcli->connfd);
+                }
+
+                save_uid_pwd(pcli->uid, param1, param2); /* TODO: 错误检查 */
+                sprintf(buffer_out, "<< resgister successfully with %d\n", pcli->uid);
+                send_message_self(buffer_out, pcli->connfd);
+            }
+            else if (!strcmp(command, "/login"))
+            {
+                param1 = strtok(NULL, " "); /* uid */
+                param2 = strtok(NULL, " "); /* pwd */
+                if (param1 == NULL || param2 == NULL)
+                {
+                    send_message_self("<< uid or password cannot be null\n", pcli->connfd);
+                    continue;
+                }
+
+                int uid = atoi(param1); /* TODO: 输入检查 */
+
+                int status = verify_uid_pwd(uid, param2, pcli->name);
+                if (0 == status)
+                {
+                    online_modify(pcli->uid, uid, pcli->name); /* 需要修改在线列表中的 uid 和 name，列表 client_t 是复制了一份 */
+                    pcli->uid = uid; /* 修改完列表，再修改当前 client_t 信息 */
+                    is_login = 1; /* 登入成功 */
+                    sprintf(buffer_out, "<< login successfully with %s (%d)\n", pcli->name, pcli->uid);
+                    send_message_self(buffer_out, pcli->connfd);
+                }
+                else if (1 == status)
+                {
+                    send_message_self("<< uid and password do not match\n", pcli->connfd);
+                }
+                else
+                {
+                    send_message_self("<< uid not found\n", pcli->connfd);
+                }
+
+            }
             else if (!strcmp(command, "/msg"))
             {
+                if (!is_login)
+                {
+                    send_message_self("<< login first or register\n", pcli->connfd);
+                    continue;
+                }
                 param1 = strtok(NULL, " ");
                 param2 = strtok(NULL, " ");
                 if (param1 == NULL || param2 == NULL)
@@ -482,64 +532,20 @@ void * handle_client(void * arg)
             }
             else if (!strcmp(command, "/list"))
             {
-                send_active_clients(pcli->connfd);
-            }
-            else if (!strcmp(command, "/help"))
-            {
-                strcat(buffer_out, "<< /quit      Quit chatroom\n");
-                strcat(buffer_out, "<< /msg       <uid> <message> Send message to <uid>\n");
-                strcat(buffer_out, "<< /list      Show online clients\n");
-                strcat(buffer_out, "<< /login     <uid> <password> Login chatroom with <uid>\n");
-                strcat(buffer_out, "<< /register  <password> [name] Register with name\n");
-                strcat(buffer_out, "<< /nick      <name> Change nickname\n");
-                strcat(buffer_out, "<< /pwd       <password> Reset password\n");
-                send_message_self(buffer_out, pcli->connfd);
-            }
-            else if (!strcmp(command, "/login"))
-            {
-                param1 = strtok(NULL, " "); /* uid */
-                param2 = strtok(NULL, " "); /* pwd */
-                if (param1 == NULL || param2 == NULL)
+                if (!is_login)
                 {
-                    send_message_self("<< uid or password cannot be null\n", pcli->connfd);
+                    send_message_self("<< login first or register\n", pcli->connfd);
                     continue;
                 }
-
-                int uid = atoi(param1); /* TODO: 输入检查 */
-
-                int status = verify_uid_pwd(uid, param2, pcli->name);
-                if (0 == status)
-                {
-                    online_modify(pcli->uid, uid, pcli->name); /* 需要修改在线列表中的 uid 和 name，列表 client_t 是复制了一份 */
-                    pcli->uid = uid; /* 修改完列表，再修改当前 client_t 信息 */
-                    sprintf(buffer_out, "<< login successfully with %s (%d)\n", pcli->name, pcli->uid);
-                    send_message_self(buffer_out, pcli->connfd);
-                }
-                else if (1 == status)
-                {
-                    send_message_self("<< uid and password do not match\n", pcli->connfd);
-                }
-                else
-                {
-                    send_message_self("<< uid not found\n", pcli->connfd);
-                }
-
-            }
-            else if (!strcmp(command, "/register"))
-            {
-                param1 = strtok(NULL, " ");
-                param2 = strtok(NULL, " ");
-                if (param1 == NULL)
-                {
-                    send_message_self("<< password cannot be null\n", pcli->connfd);
-                }
-
-                save_uid_pwd(pcli->uid, param1, param2); /* TODO: 错误检查 */
-                sprintf(buffer_out, "<< resgister successfully with %d\n", pcli->uid);
-                send_message_self(buffer_out, pcli->connfd);
+                send_active_clients(pcli->connfd);
             }
             else if (!strcmp(command, "/nick"))
             {
+                if (!is_login)
+                {
+                    send_message_self("<< login first or register\n", pcli->connfd);
+                    continue;
+                }
                 param1 = strtok(NULL, " ");
                 if (param1 == NULL)
                 {
@@ -560,6 +566,11 @@ void * handle_client(void * arg)
             }
             else if (!strcmp(command, "/pwd"))
             {
+                if (!is_login)
+                {
+                    send_message_self("<< login first or register\n", pcli->connfd);
+                    continue;
+                }
                 param1 = strtok(NULL, " ");
                 if (param1 == NULL)
                 {
@@ -568,6 +579,17 @@ void * handle_client(void * arg)
                 modify_pwd_name(pcli->uid, param1, NULL); /* TODO: 错误检查 */
                 send_message_self("<< reset password successfully\n", pcli->connfd);
             }
+            else if (!strcmp(command, "/help"))
+            {
+                strcat(buffer_out, "<< /quit      Quit chatroom\n");
+                strcat(buffer_out, "<< /msg       <uid> <message> Send message to <uid>\n");
+                strcat(buffer_out, "<< /list      Show online clients\n");
+                strcat(buffer_out, "<< /login     <uid> <password> Login chatroom with <uid>\n");
+                strcat(buffer_out, "<< /register  <password> [name] Register with name\n");
+                strcat(buffer_out, "<< /nick      <name> Change nickname\n");
+                strcat(buffer_out, "<< /pwd       <password> Reset password\n");
+                send_message_self(buffer_out, pcli->connfd);
+            }
             else
             {
                 send_message_self("<< unkown command\n", pcli->connfd);
@@ -575,6 +597,11 @@ void * handle_client(void * arg)
         }
         else
         {
+            if (!is_login)
+            {
+                send_message_self("<< login first or register\n", pcli->connfd);
+                continue;
+            }
             snprintf(buffer_out, sizeof(buffer_out), "[%d] (%s) %s\n", pcli->uid, pcli->name, buffer_in);
             send_message(buffer_out, pcli->uid);
         }
@@ -598,7 +625,7 @@ int main(int argc, char * argv[])
 
     /* read user database */
     /* TODO: func */
-    uid = 200;
+    uid = 400;
 
     setup_server_listen(&listenfd);
 
