@@ -12,6 +12,15 @@
 
 static int uid = 0;
 
+/* config structure */
+typedef struct {
+    char address[STRMAX];
+    int port;
+    char logfile[STRMAX];
+} config_t;
+
+static config_t configs;
+
 /* user info structure */
 typedef struct {
     int uid;
@@ -49,6 +58,70 @@ char * s_strdup(const char * s)
     return p;
 }
 
+int parse_line(char * buf)
+{
+    if (buf == NULL)
+        return -1;
+
+    char * varname, * value, * cmnt;
+    const char * sep = " ";
+
+    varname = strtok(buf, sep);
+    if (varname == NULL)
+        return -1;
+    if ('#' == varname[0])
+        return 0;
+
+    value = strtok(NULL, sep);
+    if (value == NULL)
+        return -1;
+    int slen = strlen(value);
+    if ('\n' == value[slen-1])
+        value[slen-1] = '\0';
+
+    cmnt = strtok(NULL, sep);
+    if (cmnt != NULL && cmnt[0] != '#')
+        return -1;
+    else if (0 == strcmp(varname, "server_address"))
+        strcpy(configs.address, value);
+    else if (0 == strcmp(varname, "server_port"))
+        configs.port = atoi(value);
+    else if (0 == strcmp(varname, "log_file"))
+        strcpy(configs.logfile, value);
+    else
+        return -1;
+
+    return 0;
+}
+
+void read_server_config()
+{
+    FILE * fp = fopen("./server.conf", "r");
+    if (NULL == fp)
+    {
+        perror("opening config failed");
+        exit(EXIT_FAILURE);
+    }
+
+    char fconfig[BUFFER_SZ];
+
+    while (fgets(fconfig, BUFFER_SZ, fp) != NULL)
+    {
+        /* printf("config: %ld %s", strlen(fconfig), fconfig); */
+        if (1 == strlen(fconfig) && '\n' == fconfig[0])
+            continue;
+
+        if (-1 == parse_line(fconfig))
+        {
+            fprintf(stderr, "configuration syntax error\n");
+            exit(EXIT_FAILURE);
+        }
+    }
+
+    printf("config: addr: %s, port: %d, logfile: %s\n",
+            configs.address, configs.port, configs.logfile);
+}
+
 void setup_server_listen(int * plistenfd)
 {
     int status;
@@ -62,10 +135,10 @@ void setup_server_listen(int * plistenfd)
         exit(EXIT_FAILURE);
     }
     serv_addr.sin_family = AF_INET;
-    serv_addr.sin_port = htons(SERVER_PORT);
-    if (0 == inet_pton(AF_INET, SERVER_ADDR, &serv_addr.sin_addr))
+    serv_addr.sin_port = htons(configs.port);
+    if (0 == inet_pton(AF_INET, configs.address, &serv_addr.sin_addr))
     {
-        fprintf(stderr, "converting %s to IPv4 address failed!\n", SERVER_ADDR);
+        fprintf(stderr, "converting %s to IPv4 address failed!\n", configs.address);
         close(*plistenfd);
         exit(EXIT_FAILURE);
     }
@@ -521,7 +594,7 @@ int main(int argc, char * argv[])
     pthread_t tid;
 
     /* read server config */
-    /* TODO: func */
+    read_server_config();
 
     /* read user database */
     /* TODO: func */
