@@ -250,30 +250,43 @@ void online_delete(int uid)
     pthread_mutex_unlock(&clients_mutex);
 }
 
-void online_modify(int uid, int newuid, const char * newname)
+online_t * online_modify(int uid, int newuid, const char * newname)
 {
     pthread_mutex_lock(&clients_mutex);
     online_t * online = ol_uids;
+    online_t * found = NULL;
+
     while (online != NULL)
     {
-        printf("[DEBUG] %p | %p\n", online, online->next);
+        printf("[DEBUG] (%d) %p | %p\n", online->client.uid, online, online->next);
         if (online->client.uid == uid)
         {
-            if (newuid != 0)
+            if (found == NULL)
             {
-                online->client.uid = newuid;
+                found = online;
             }
-            if (newname != NULL)
-            {
-                strcpy(online->client.name, newname);
-            }
-            fprintf(stdout, "<< uid %d with name %s modify successfuly\n",
-                    online->client.uid, online->client.name);
-            break;
+        }
+        if (online->client.uid == newuid)
+        {
+            pthread_mutex_unlock(&clients_mutex);
+            return NULL; /* already login */
         }
         online = online->next;
     }
+
+    /* only found once */
+    if (newuid != 0)
+    {
+        found->client.uid = newuid;
+    }
+    if (newname != NULL)
+    {
+        strcpy(found->client.name, newname);
+    }
+    fprintf(stdout, "<< uid %d with name %s modify successfuly\n",
+            found->client.uid, found->client.name);
     pthread_mutex_unlock(&clients_mutex);
+    return found;
 }
 
 /* print client info */
@@ -497,7 +510,7 @@ void * handle_client(void * arg)
             {
                 if (1 == is_login)
                 {
-                    send_message_self("<< already login\n", pcli->connfd);
+                    send_message_self("<<already have other users logged in\n", pcli->connfd);
                     continue;
                 }
                 param1 = strtok(NULL, " "); /* uid */
@@ -513,7 +526,13 @@ void * handle_client(void * arg)
                 int status = verify_uid_pwd(uid, param2, pcli->name);
                 if (0 == status)
                 {
-                    online_modify(pcli->uid, uid, pcli->name); /* 需要修改在线列表中的 uid 和 name，列表 client_t 是复制了一份 */
+                    /* 需要修改在线列表中的 uid 和 name，列表 client_t 是复制了一份 */
+                    if (NULL == online_modify(pcli->uid, uid, pcli->name))
+                    {
+                        sprintf(buffer_out, "<< %s (%d) has logged in\n", pcli->name, uid);
+                        send_message_self(buffer_out, pcli->connfd);
+                        continue;
+                    }
                     pcli->uid = uid; /* 修改完列表，再修改当前 client_t 信息 */
                     is_login = 1; /* 登入成功 */
                     sprintf(buffer_out, "<< login successfully with %s (%d)\n", pcli->name, pcli->uid);
