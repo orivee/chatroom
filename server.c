@@ -448,6 +448,12 @@ void * handle_client(void * arg)
         if (msglen != msgprot.length)
             continue;
 
+        if (0 == strcmp(buffer_in, "/alive"))
+        {
+            /* printf("[DEBUG] %d, alive\n", pcli->connfd); */
+            continue;
+        }
+
         if (buffer_in[0] == '/')
         {
             char * command, * param1, * param2;

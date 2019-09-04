@@ -71,8 +71,9 @@ void rdev_add(int epfd, int fd)
 }
 
 
-void send_message_server(msgprot_t * pmsgprot, int connfd)
+void send_message_server(char * msg, int connfd)
 {
+    msgprot_t * pmsgprot = message_pack(msg);
     if (write(connfd, pmsgprot, sizeof(msgprot_t) + pmsgprot->length) < 0)
     {
         perror("writing to descriptor failed");
@@ -104,7 +105,6 @@ int main(int argc, char *argv[])
     int ev_avail = 0; /* event ready */
     char buffer_out[BUFFER_SZ];
     char * buffer_in = NULL;
-    msgprot_t * pmsgprot = NULL;
 
     setup_client_connect(&connfd);
 
@@ -121,11 +121,12 @@ int main(int argc, char *argv[])
 
     while (1)
     {
-        ev_avail = epoll_wait(epfd, events, 2, -1);
+        ev_avail = epoll_wait(epfd, events, 2, 3000);
 
         /* 超时向客户端发送消息，证明自己活着 */
         if (0 == ev_avail)
         {
+            send_message_server("/alive", connfd);
             continue;
         }
 
@@ -137,14 +138,13 @@ int main(int argc, char *argv[])
                 if (0 == strlen(buffer_out)) /* 不处理直接回车的 buffer */
                     break;
                 printf("[DEBUG] buffer_out: %s\n", buffer_out);
-                pmsgprot = message_pack(buffer_out);
                 if (!strcmp(buffer_out, "/quit"))
                 {
                     printf("[DEBUG] close ...\n");
                     close(connfd);
                     exit(EXIT_FAILURE);
                 }
-                send_message_server(pmsgprot, connfd);
+                send_message_server(buffer_out, connfd);
             }
             else /* 从服务端读入数据 */
             {
