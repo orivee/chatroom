@@ -881,5 +881,7 @@ int main(int argc, char * argv[])
         sleep(1);
     }
 
+    log_close_fp(configs.logpath);
+
     return 0;
 }
