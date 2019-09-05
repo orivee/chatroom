@@ -6,23 +6,12 @@
 #include <time.h>
 #include <stdarg.h>
 
+#include "log.h"
+
 #define BUFFER_SZ 2048
 #define STRMAX 31
 #define BACKLOG 5
 #define EVMAX 100
-
-enum {LOG_ERROR, LOG_INFO, LOG_DEBUG};
-
-static const char * level_names[] = {
-    "ERROR", "INFO", "DEBUG"
-};
-
-#define log_error(...) log_log(LOG_ERROR, __FILE__, __FUNCTION__, __LINE__, __VA_ARGS__)
-#define log_info(...) log_log(LOG_INFO, __FILE__, __FUNCTION__, __LINE__, __VA_ARGS__)
-#define log_debug(...) log_log(LOG_DEBUG, __FILE__, __FUNCTION__, __LINE__, __VA_ARGS__)
-
-FILE * log_fp = NULL;
-pthread_mutex_t logfile_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 /* config structure */
 typedef struct
@@ -82,84 +71,6 @@ char * s_strdup(const char * s)
         memcpy(p, s, size);
     }
     return p;
-}
-
-char * timenow()
-{
-    static char buffer[64];
-    time_t rawtime;
-    struct tm * timeinfo;
-
-    time(&rawtime);
-    timeinfo = localtime(&rawtime);
-
-    buffer[strftime(buffer, 64, "%Y-%m-%d %H:%M:%S", timeinfo)] = '\0';
-
-    return buffer;
-}
-
-void log_set_fp(const char * file)
-{
-    /* printf("file: %s %ld\n", file, strlen(file)); */
-    if (NULL == file || 0 == strlen(file))
-        return;
-
-    log_fp = fopen(file, "a+");
-    if (log_fp == NULL)
-    {
-        fprintf(stderr, "log file openning failed\n");
-    }
-}
-
-void log_close_fp()
-{
-    if (EOF == fclose(log_fp))
-    {
-        fprintf(stderr, "log file closing failed\n");
-    }
-}
-
-void log_log(int level, const char * file, const char * func, int line, const char * str, ...)
-{
-    /* construct args string */
-    va_list argp;
-    va_start(argp, str);
-    int max_va_list_size = 4146; /* 不能明确大小，所以定个大一点的数 */
-    char * va_msg = (char *) malloc(strlen(str) + max_va_list_size);
-    int va_string_size = vsnprintf(va_msg, strlen(str) + max_va_list_size, str, argp);
-    va_end(argp);
-
-    /* get current */
-    char * date = timenow();
-
-    /* construct log string expect args string */
-    char pos[strlen(date) + 512];
-    int pos_size = snprintf(pos, 1024, "%s | %-5s | %-10s | %s:%d |", date, level_names[level], file, func, line);
-    /* printf("%s\n", pos); */
-
-    /* construct final log string */
-    int msgsize = va_string_size + pos_size + 50;
-    char * msg = (char *) malloc(msgsize);
-    sprintf(msg, "%s %s\n", pos, va_msg);
-
-    if (!configs.quiet)
-    {
-        if (0 == level)
-            fprintf(stderr, msg);
-        else
-            fprintf(stdout, msg);
-    }
-
-    if (configs.logpath && log_fp)
-    {
-        pthread_mutex_lock(&logfile_mutex);
-        fprintf(log_fp, "%s", msg);
-        fflush(log_fp);
-        pthread_mutex_unlock(&logfile_mutex);
-    }
-
-    free(va_msg);
-    free(msg);
 }
 
 /* parse a row config */
@@ -795,8 +706,9 @@ void load_arguments(int argc, char ** argv)
         {"config", required_argument, 0, 'f'},
         {"bind_ip", required_argument, 0, 'i'},
         {"port", required_argument, 0, 'p'},
+        {"quiet", no_argument, 0, 'q'},
         {"logpath", required_argument, 0, 'l'},
-        {"daemon", required_argument, 0, 'd'}
+        {"daemon", no_argument, 0, 'd'}
     };
 
     int c;
@@ -804,7 +716,7 @@ void load_arguments(int argc, char ** argv)
 
     while (1)
     {
-        c = getopt_long(argc, argv, "hf:p:i:l:d", long_options, &option_index);
+        c = getopt_long(argc, argv, "hf:p:qi:l:d", long_options, &option_index);
 
         if (-1 == c)
             break;
@@ -818,7 +730,8 @@ void load_arguments(int argc, char ** argv)
                 printf("\t--config <filename>, -f <filename>\n\t\tspecify configure file\n");
                 printf("\t--bind_ip <ipaddress>, -i <ipaddress>\n");
                 printf("\t--port <port>, -p <port>\n");
-                printf("\t--logpath <path>\n");
+                printf("\t--quiet, -q\n");
+                printf("\t--logpath <path>, -l <path>\n");
                 printf("\t--daemon, -d\n");
                 exit(EXIT_FAILURE);
             case 'f':
@@ -831,6 +744,8 @@ void load_arguments(int argc, char ** argv)
                 if (optarg)
                     strcpy(configs.ip, optarg);
                 break;
+            case 'q':
+                configs.quiet = 1;
             case 'l':
                 if (optarg)
                     strcpy(configs.logpath, optarg);
@@ -856,6 +771,7 @@ int main(int argc, char * argv[])
 
     /* open log file */
     log_set_fp(configs.logpath);
+    log_set_quiet(configs.quiet);
 
     log_info("load server config from file");
     log_info("load server config from command arguments");
