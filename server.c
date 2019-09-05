@@ -134,7 +134,7 @@ void log_log(int level, const char * file, const char * func, int line, const ch
 
     /* construct log string expect args string */
     char pos[strlen(date) + 512];
-    int pos_size = snprintf(pos, 1024, "%s | %-7s | %-15s | %s:%d |", date, level_names[level], file, func, line);
+    int pos_size = snprintf(pos, 1024, "%s | %-5s | %-10s | %s:%d |", date, level_names[level], file, func, line);
     /* printf("%s\n", pos); */
 
     /* construct final log string */
@@ -205,7 +205,7 @@ void read_server_config()
     FILE * fp = fopen("./server.conf", "r");
     if (NULL == fp)
     {
-        perror("opening config failed");
+        log_error("opening config failed: %s", strerror(errno));
         exit(EXIT_FAILURE);
     }
 
@@ -219,19 +219,24 @@ void read_server_config()
 
         if (-1 == parse_line(fconfig))
         {
-            fprintf(stderr, "configuration syntax error\n");
+            log_error("configuration syntax error");
             exit(EXIT_FAILURE);
         }
     }
 
-    printf("config: addr: %s, port: %d, logpath: %s\n",
-            configs.ip, configs.port, configs.logpath);
+    /* printf("config: addr: %s, port: %d, logpath: %s\n", */
+    /*         configs.ip, configs.port, configs.logpath); */
 }
 
 /* uid initialization */
 void uid_init()
 {
     FILE * fp = fopen("./users.db", "r");
+    if (NULL == fp)
+    {
+        log_error("users database open failed: %s", strerror(errno));
+        exit(EXIT_FAILURE);
+    }
     user_info_t user_info;
 
     while (fread(&user_info, sizeof(user_info_t), 1, fp)) /* stop after an EOF or a newline */
@@ -242,6 +247,7 @@ void uid_init()
     }
 
     uid = uid + 1;
+    /* log_debug("init uid: %d", uid); */
 }
 
 void setup_server_listen(int * plistenfd)
@@ -253,14 +259,14 @@ void setup_server_listen(int * plistenfd)
     *plistenfd = socket(AF_INET, SOCK_STREAM, 0);
     if (-1 == *plistenfd)
     {
-        perror("socket creating failed");
+        log_error("socket creating failed: %s", strerror(errno));
         exit(EXIT_FAILURE);
     }
     serv_addr.sin_family = AF_INET;
     serv_addr.sin_port = htons(configs.port);
     if (0 == inet_pton(AF_INET, configs.ip, &serv_addr.sin_addr))
     {
-        fprintf(stderr, "converting %s to IPv4 address failed!\n", configs.ip);
+        log_error("converting %s to IPv4 address failed!", configs.ip);
         close(*plistenfd);
         exit(EXIT_FAILURE);
     }
@@ -272,7 +278,7 @@ void setup_server_listen(int * plistenfd)
     status = bind(*plistenfd, (struct sockaddr *) &serv_addr, sizeof(serv_addr));
     if (-1 == status)
     {
-        perror("socket binding failed");
+        log_error("socket binding failed: %s", strerror(errno));
         close(*plistenfd);
         exit(EXIT_FAILURE);
     }
@@ -281,7 +287,7 @@ void setup_server_listen(int * plistenfd)
     status = listen(*plistenfd, BACKLOG);
     if (-1 == status)
     {
-        perror("socket listening failed");
+        log_error("socket listening failed: %s", strerror(errno));
         close(*plistenfd);
         exit(EXIT_FAILURE);
     }
@@ -296,7 +302,7 @@ client_t * accept_client(int * plistenfd, int * pconnfd)
     *pconnfd = accept(*plistenfd, (struct sockaddr *) &cli_addr, &clilen);
     if (-1 == *pconnfd)
     {
-        perror("client accepting failed");
+        log_error("client accepting failed: %s", strerror(errno));
         close(*plistenfd);
         exit(EXIT_FAILURE);
     }
@@ -320,7 +326,7 @@ void online_add(client_t * pcli)
     ponline->next = ol_uids;
     ol_uids = ponline;
 
-    printf("[DEBUG]: add %p | %p\n", ol_uids, ol_uids->next);
+    /* printf("[DEBUG]: add %p | %p\n", ol_uids, ol_uids->next); */
     /* printf("[DEBUG]: add %p\n", pcli); */
     pthread_mutex_unlock(&clients_mutex);
 }
@@ -342,7 +348,7 @@ void online_delete(int uid)
     ol_uids_t pprev = ol_uids;
     while (pnode != NULL)
     {
-        printf("[DEBUG]: delete %p | %p\n", pprev, pprev->next);
+        /* printf("[DEBUG]: delete %p | %p\n", pprev, pprev->next); */
         if (pnode->client.uid == uid)
         {
             pprev->next = pnode->next;
@@ -363,7 +369,7 @@ online_t * online_modify(int uid, int newuid, const char * newname)
 
     while (online != NULL)
     {
-        printf("[DEBUG] (%d) %p | %p\n", online->client.uid, online, online->next);
+        /* printf("[DEBUG] (%d) %p | %p\n", online->client.uid, online, online->next); */
         if (online->client.uid == uid)
         {
             if (found == NULL)
@@ -388,7 +394,7 @@ online_t * online_modify(int uid, int newuid, const char * newname)
     {
         strcpy(found->client.name, newname);
     }
-    fprintf(stdout, "<< uid %d with name %s modify successfuly\n",
+    log_info("<< uid %d with name %s modify successfuly",
             found->client.uid, found->client.name);
     pthread_mutex_unlock(&clients_mutex);
     return found;
@@ -396,11 +402,18 @@ online_t * online_modify(int uid, int newuid, const char * newname)
 
 /* print client info */
 
-void print_client_addr(struct sockaddr_in addr)
+char * print_client_addr(struct sockaddr_in addr)
 {
-    char addr_str[INET_ADDRSTRLEN];
+    char addr_str[INET_ADDRSTRLEN], addr_port[20];
     inet_ntop(AF_INET, (void *) &addr.sin_addr, addr_str, sizeof(addr_str));
-    printf("%s:%d", addr_str, ntohs(addr.sin_port));
+    sprintf(addr_port, "%d", ntohs(addr.sin_port));
+
+    char * cli_info = (char *) malloc(strlen(addr_str) + strlen(addr_port) + 10);
+    strcat(cli_info, addr_str);
+    strcat(cli_info, ":");
+    strcat(cli_info, addr_port);
+    cli_info[strlen(cli_info)] = '\0';
+    return cli_info;
 }
 
 /* send message to sender */
@@ -409,7 +422,7 @@ void send_message_self(const char * msg, int connfd)
     msgprot_t * pmsgprot = message_pack(msg);
     if (write(connfd, pmsgprot, sizeof(msgprot_t) + pmsgprot->length) < 0)
     {
-        perror("writing to descriptor failed");
+        log_error("writing to descriptor failed: %s", strerror(errno));
         close(connfd);
         /* 如果当前进程中 mutex 变量被加锁了， 就在退出前解锁，防止 deadlock*/
         /* if (EBUSY == pthread_mutex_trylock(&clients_mutex))*/
@@ -430,7 +443,7 @@ int send_message_client(const char * msg, int uid)
         {
             if (write(pscan->client.connfd, pmsgprot, sizeof(msgprot_t) + pmsgprot->length) < 0)
             {
-                perror("fowarding message to client failed");
+                log_error("fowarding message to client failed: %s", strerror(errno));
                 /* close(pscan->client.connfd); */
                 pthread_mutex_unlock(&clients_mutex);
                 return -1; /* 消息发送不成功 */
@@ -457,7 +470,7 @@ void send_message(char * msg, int uid)
         {
             if (write(pnode->client.connfd, pmsgprot, sizeof(msgprot_t) + pmsgprot->length) < 0)
             {
-                perror("writing to descriptor failed");
+                log_error("writing to descriptor failed: %s", strerror(errno));
                 break;
             }
         }
@@ -470,12 +483,18 @@ void send_active_clients(int connfd)
 {
     pthread_mutex_lock(&clients_mutex);
     online_t * pnode = ol_uids;
-    char buffer_out[BUFFER_SZ];
+    msgprot_t * pmsgprot;
+    char msg[BUFFER_SZ];
 
     while (pnode != NULL)
     {
-        sprintf(buffer_out, "%s (%d)\n", pnode->client.name, pnode->client.uid);
-        send_message_self(buffer_out, connfd);
+        sprintf(msg, "%s (%d)\n", pnode->client.name, pnode->client.uid);
+        pmsgprot = message_pack(msg);
+        if (write(connfd, pmsgprot, sizeof(msgprot_t) + pmsgprot->length) < 0)
+        {
+            log_error("writing to descriptor failed: %s", strerror(errno));
+            break;
+        }
         pnode = pnode->next;
     }
     pthread_mutex_unlock(&clients_mutex);
@@ -558,15 +577,16 @@ void * handle_client(void * arg)
 {
     char buffer_out[BUFFER_SZ];
     char * buffer_in;
+    char * cli_info;
     msgprot_t msgprot;
     int msglen;
     int is_login = 0; /* 登入标志 0 未登入；1 登入 */
 
     client_t * pcli = (client_t *) arg;
 
-    printf("<< accept ");
-    print_client_addr(pcli->addr);
-    printf(" logged in with annoymous and referenced by %d\n", pcli->uid);
+    cli_info = print_client_addr(pcli->addr);
+    log_info("<< accept %s logged in with annoymous and referenced by %d", cli_info, pcli->uid);
+    free(cli_info);
 
     /* pthread_mutex_lock(&clients_mutex); */
     /* sprintf(buffer_out, "<< accept [%s (%d)] login\n", pcli->name, pcli->uid); */
@@ -593,7 +613,7 @@ void * handle_client(void * arg)
         {
             char * command, * param1, * param2;
             command = strtok(buffer_in, " ");
-            printf("command: %s\n", command);
+            /* printf("command: %s\n", command); */
             if (!strcmp(command, "/quit"))
             {
                 break;
@@ -706,7 +726,7 @@ void * handle_client(void * arg)
                 char * oldname = s_strdup(pcli->name);
                 if (!oldname)
                 {
-                    perror("cannot allocate memory for name");
+                    log_error("cannot allocate memory for name: %s", strerror(errno));
                     continue;
                 }
                 modify_pwd_name(pcli->uid, NULL, param1); /* TODO: 错误检查 */
@@ -759,7 +779,7 @@ void * handle_client(void * arg)
         }
     }
 
-    fprintf(stdout, "<< %s (%d) has left\r\n", pcli->name, pcli->uid);
+    log_info("<< %s (%d) has left", pcli->name, pcli->uid);
     online_delete(pcli->uid);
     close(pcli->connfd);
     free(pcli);
@@ -769,7 +789,7 @@ void * handle_client(void * arg)
 
 void load_arguments(int argc, char ** argv)
 {
-    static struct option long_options[] =
+    struct option long_options[] =
     {
         {"help", no_argument, 0, 'h'},
         {"config", required_argument, 0, 'f'},
@@ -828,20 +848,21 @@ int main(int argc, char * argv[])
     int listenfd = 0, connfd = 0;
     pthread_t tid;
 
-
     /* read server config */
     read_server_config();
 
     /* load command arguments */
     load_arguments(argc, argv);
 
-    printf("config: addr: %s, port: %d, logpath: %s\n",
-            configs.ip, configs.port, configs.logpath);
-
     /* open log file */
     log_set_fp(configs.logpath);
 
-    /* read user database */
+    log_info("load server config from file");
+    log_info("load server config from command arguments");
+    log_info("config: addr: %s, port: %d, logpath: %s",
+            configs.ip, configs.port, configs.logpath);
+
+    /* read user database file */
     uid_init();
     /* printf("init uid: %d\n", uid); */
 
