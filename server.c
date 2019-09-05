@@ -3,24 +3,46 @@
 #include <signal.h>
 #include <pthread.h>
 #include <errno.h>
+#include <time.h>
+#include <stdarg.h>
 
 #define BUFFER_SZ 2048
 #define STRMAX 31
 #define BACKLOG 5
 #define EVMAX 100
 
-static int uid = 0;
+enum {LOG_ERROR, LOG_INFO, LOG_DEBUG};
+
+static const char * level_names[] = {
+    "ERROR", "INFO", "DEBUG"
+};
+
+#define log_error(...) log_log(LOG_ERROR, __FILE__, __FUNCTION__, __LINE__, __VA_ARGS__)
+#define log_info(...) log_log(LOG_INFO, __FILE__, __FUNCTION__, __LINE__, __VA_ARGS__)
+#define log_debug(...) log_log(LOG_DEBUG, __FILE__, __FUNCTION__, __LINE__, __VA_ARGS__)
+
+FILE * log_fp = NULL;
+pthread_mutex_t logfile_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 /* config structure */
-typedef struct {
-    char config[STRMAX];
-    char address[STRMAX];
-    char logpath[STRMAX];
-    int slient;
-    int port;
+typedef struct
+{
+    char config[STRMAX];    /* configuration file */
+    char ip[STRMAX];        /* server socket bind ip address */
+    char logpath[STRMAX];   /* log file pathname */
+    int quiet;             /* quiet mode */
+    int port;               /* server socket bind port */
 } config_t;
 
-static config_t configs;
+/* init config paramters */
+static config_t configs =
+{
+    "server.conf",
+    "127.0.0.1",
+    "",
+    0,
+    7000
+};
 
 /* user info structure */
 typedef struct {
@@ -28,6 +50,8 @@ typedef struct {
     char name[STRMAX];
     char passwd[STRMAX];
 } user_info_t;
+
+static int uid = 0;
 
 /* client structure */
 typedef struct {
@@ -60,6 +84,84 @@ char * s_strdup(const char * s)
     return p;
 }
 
+char * timenow()
+{
+    static char buffer[64];
+    time_t rawtime;
+    struct tm * timeinfo;
+
+    time(&rawtime);
+    timeinfo = localtime(&rawtime);
+
+    buffer[strftime(buffer, 64, "%Y-%m-%d %H:%M:%S", timeinfo)] = '\0';
+
+    return buffer;
+}
+
+void log_set_fp(const char * file)
+{
+    /* printf("file: %s %ld\n", file, strlen(file)); */
+    if (NULL == file || 0 == strlen(file))
+        return;
+
+    log_fp = fopen(file, "a+");
+    if (log_fp == NULL)
+    {
+        fprintf(stderr, "log file openning failed\n");
+    }
+}
+
+void log_close_fp()
+{
+    if (EOF == fclose(log_fp))
+    {
+        fprintf(stderr, "log file closing failed\n");
+    }
+}
+
+void log_log(int level, const char * file, const char * func, int line, const char * str, ...)
+{
+    /* construct args string */
+    va_list argp;
+    va_start(argp, str);
+    int max_va_list_size = 4146; /* 不能明确大小，所以定个大一点的数 */
+    char * va_msg = (char *) malloc(strlen(str) + max_va_list_size);
+    int va_string_size = vsnprintf(va_msg, strlen(str) + max_va_list_size, str, argp);
+    va_end(argp);
+
+    /* get current */
+    char * date = timenow();
+
+    /* construct log string expect args string */
+    char pos[strlen(date) + 512];
+    int pos_size = snprintf(pos, 1024, "%s | %-7s | %-15s | %s:%d |", date, level_names[level], file, func, line);
+    /* printf("%s\n", pos); */
+
+    /* construct final log string */
+    int msgsize = va_string_size + pos_size + 50;
+    char * msg = (char *) malloc(msgsize);
+    sprintf(msg, "%s %s\n", pos, va_msg);
+
+    if (!configs.quiet)
+    {
+        if (0 == level)
+            fprintf(stderr, msg);
+        else
+            fprintf(stdout, msg);
+    }
+
+    if (configs.logpath && log_fp)
+    {
+        pthread_mutex_lock(&logfile_mutex);
+        fprintf(log_fp, "%s", msg);
+        fflush(log_fp);
+        pthread_mutex_unlock(&logfile_mutex);
+    }
+
+    free(va_msg);
+    free(msg);
+}
+
 /* parse a row config */
 int parse_line(char * buf)
 {
@@ -86,7 +188,7 @@ int parse_line(char * buf)
     if (cmnt != NULL && cmnt[0] != '#')
         return -1;
     else if (0 == strcmp(varname, "server_address"))
-        strcpy(configs.address, value);
+        strcpy(configs.ip, value);
     else if (0 == strcmp(varname, "server_port"))
         configs.port = atoi(value);
     else if (0 == strcmp(varname, "log_file"))
@@ -123,7 +225,7 @@ void read_server_config()
     }
 
     printf("config: addr: %s, port: %d, logpath: %s\n",
-            configs.address, configs.port, configs.logpath);
+            configs.ip, configs.port, configs.logpath);
 }
 
 /* uid initialization */
@@ -156,9 +258,9 @@ void setup_server_listen(int * plistenfd)
     }
     serv_addr.sin_family = AF_INET;
     serv_addr.sin_port = htons(configs.port);
-    if (0 == inet_pton(AF_INET, configs.address, &serv_addr.sin_addr))
+    if (0 == inet_pton(AF_INET, configs.ip, &serv_addr.sin_addr))
     {
-        fprintf(stderr, "converting %s to IPv4 address failed!\n", configs.address);
+        fprintf(stderr, "converting %s to IPv4 address failed!\n", configs.ip);
         close(*plistenfd);
         exit(EXIT_FAILURE);
     }
@@ -707,7 +809,7 @@ void load_arguments(int argc, char ** argv)
                 break;
             case 'i':
                 if (optarg)
-                    strcpy(configs.address, optarg);
+                    strcpy(configs.ip, optarg);
                 break;
             case 'l':
                 if (optarg)
@@ -726,6 +828,7 @@ int main(int argc, char * argv[])
     int listenfd = 0, connfd = 0;
     pthread_t tid;
 
+
     /* read server config */
     read_server_config();
 
@@ -733,7 +836,10 @@ int main(int argc, char * argv[])
     load_arguments(argc, argv);
 
     printf("config: addr: %s, port: %d, logpath: %s\n",
-            configs.address, configs.port, configs.logpath);
+            configs.ip, configs.port, configs.logpath);
+
+    /* open log file */
+    log_set_fp(configs.logpath);
 
     /* read user database */
     uid_init();
@@ -741,7 +847,7 @@ int main(int argc, char * argv[])
 
     setup_server_listen(&listenfd);
 
-    printf("<[ SERVER STARTED ]>\n");
+    log_info("<[ SERVER STARTED ]>");
 
     while (1)
     {
