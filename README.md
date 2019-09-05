@@ -13,6 +13,7 @@ Makefile:
 * [How to use LDFLAGS in makefile](https://stackoverflow.com/q/13249610/3737970)
 * [Building And Using Static And Shared "C" Libraries](http://docencia.ac.upc.edu/FIB/USO/Bibliografia/unix-c-libraries.html)
 * [Practical Makefiles, by example](http://nuclear.mutantstargoat.com/articles/make/)
+* [Add .so and .a libraries to Makefile](https://stackoverflow.com/q/12054858/3737970)
 
 TCP:
 
@@ -22,6 +23,17 @@ TCP:
 * [Five pitfalls of Linux sockets programming](https://developer.ibm.com/tutorials/l-sockpit/)
 * [Understanding the Internet: How Messages Flow Through TCP Sockets](https://andrewskotzko.com/understanding-the-internet-how-messages-flow-through-tcp-sockets/)
 
+Variable arguments:
+
+* `va_list`, `va_arg`, `va_end`
+* `vsnprintf`, `vsprintf`
+* [Variable Argument Lists in C using va_list](https://www.cprogramming.com/tutorial/c/lesson17.html)
+* [How do varargs work in C?](https://jameshfisher.com/2016/11/23/c-varargs/)
+
+Enum:
+
+* [Print text instead of value from C enum](https://stackoverflow.com/q/3168306/3737970)
+* [How to define an enumerated type (enum) in C?](https://stackoverflow.com/q/1102542/3737970)
 ## Solution
 
 **问题 1：** 如何实现客户端既能从服务端读取消息，也能接受终端输入发往服务器的消息？
@@ -116,3 +128,47 @@ The `fseek(ft, 0, SEEK_CUR);` statement is required by the C standard.
 写入一个结构体，然后修改结构体，再写入。这样可以。
 
 [^2]: [modify existing contents of file in c](https://stackoverflow.com/q/21958155/3737970)
+
+----
+
+**问题 5：** 如何解析命令行参数？
+
+**方案：**
+
+* [Parsing command-line arguments in C?](https://stackoverflow.com/q/9642732/3737970)
+* [Argument-parsing helpers for C/Unix](https://stackoverflow.com/q/189972/3737970)
+* [GUN Getopt](https://www.gnu.org/software/libc/manual/html_node/Getopt.html)
+
+----
+
+**问题 6：** 实现日志记录器
+
+**方案：**
+
+当前时间的获取：
+
+```c
+#include <time.h>
+
+char * timenow()
+{
+    static char buffer[64];
+    time_t rawtime;
+    struct tm * timeinfo;
+
+    time(&rawtime);
+    timeinfo = localtime(&rawtime);
+
+    strftime(buffer, 64, "%Y-%m-%d %H:%M:%S", timeinfo);
+
+    return buffer;
+}
+```
+
+`fflush()` - flush a stream
+
+* [rxi/log.c](https://github.com/rxi/log.c)
+* [a simplified logging system using macros](https://coderwall.com/p/v6u7jq/a-simplified-logging-system-using-macros)
+    * [dmcrodrigues/macro-logger](https://github.com/dmcrodrigues/macro-logger)
+* [ntpeters/SimpleLogger](https://github.com/ntpeters/SimpleLogger)
+* [storing logs/error message on C programming](https://stackoverflow.com/q/16116143/3737970)
