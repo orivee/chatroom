@@ -312,7 +312,6 @@ online_t * online_modify(int uid, int newuid, const char * newname)
 }
 
 /* print client info */
-
 char * print_client_addr(struct sockaddr_in addr)
 {
     char addr_str[INET_ADDRSTRLEN], addr_port[20];
@@ -335,11 +334,14 @@ void send_message_self(const char * msg, int connfd)
     {
         log_error("writing to descriptor failed: %s", strerror(errno));
         close(connfd);
+
+        free(pmsgprot);
         /* 如果当前进程中 mutex 变量被加锁了， 就在退出前解锁，防止 deadlock*/
         /* if (EBUSY == pthread_mutex_trylock(&clients_mutex))*/
         /*     pthread_mutex_unlock(&clients_mutex);*/
         exit(EXIT_FAILURE); 
     }
+    free(pmsgprot);
 }
 
 /* send message to client */
@@ -356,14 +358,17 @@ int send_message_client(const char * msg, int uid)
             {
                 log_error("fowarding message to client failed: %s", strerror(errno));
                 /* close(pscan->client.connfd); */
+                free(pmsgprot);
                 pthread_mutex_unlock(&clients_mutex);
                 return -1; /* 消息发送不成功 */
             }
+            free(pmsgprot);
             pthread_mutex_unlock(&clients_mutex);
             return 0; /* 消息发送成功 */
         }
         pscan = pscan->next;
     }
+    free(pmsgprot);
     pthread_mutex_unlock(&clients_mutex);
     return 1; /* 消息对象不存在 */
 }
@@ -381,12 +386,13 @@ void send_message(char * msg, int uid)
         {
             if (write(pnode->client.connfd, pmsgprot, sizeof(msgprot_t) + pmsgprot->length) < 0)
             {
-                log_error("writing to descriptor failed: %s", strerror(errno));
-                break;
+                log_error("send to uid %d failed: %s", pnode->client.uid, strerror(errno));
+                continue;
             }
         }
         pnode = pnode->next;
     }
+    free(pmsgprot);
     pthread_mutex_unlock(&clients_mutex);
 }
 
@@ -404,10 +410,12 @@ void send_active_clients(int connfd)
         if (write(connfd, pmsgprot, sizeof(msgprot_t) + pmsgprot->length) < 0)
         {
             log_error("writing to descriptor failed: %s", strerror(errno));
+            free(pmsgprot);
             break;
         }
         pnode = pnode->next;
     }
+    free(pmsgprot);
     pthread_mutex_unlock(&clients_mutex);
 }
 
@@ -487,7 +495,7 @@ void modify_pwd_name(const int uid, const char * pwd, const char * name)
 void * handle_client(void * arg)
 {
     char buffer_out[BUFFER_SZ];
-    char * buffer_in;
+    char * buffer_in = NULL; /* attention: 在用后 free() */
     char * cli_info;
     msgprot_t msgprot;
     int msglen;
@@ -509,14 +517,21 @@ void * handle_client(void * arg)
     {
         msglen = message_unpack(pcli->connfd, &buffer_in, msgprot.length);
         if (msglen <= 0)
+        {
+            free(buffer_in);
             break;
+        }
         /* 读取的数据长度不一致，舍弃 */
         if (msglen != msgprot.length)
+        {
+            free(buffer_in);
             continue;
+        }
 
         if (0 == strcmp(buffer_in, "/alive"))
         {
             /* printf("[DEBUG] %d, alive\n", pcli->connfd); */
+            free(buffer_in);
             continue;
         }
 
@@ -527,6 +542,7 @@ void * handle_client(void * arg)
             /* printf("command: %s\n", command); */
             if (!strcmp(command, "/quit"))
             {
+                free(buffer_in);
                 break;
             }
             else if (!strcmp(command, "/register"))
@@ -536,17 +552,21 @@ void * handle_client(void * arg)
                 if (param1 == NULL)
                 {
                     send_message_self("<< password cannot be null\n", pcli->connfd);
+                    free(buffer_in);
+                    break;
                 }
 
                 save_uid_pwd(pcli->uid, param1, param2); /* TODO: 错误检查 */
                 sprintf(buffer_out, "<< resgister successfully with %d\n", pcli->uid);
                 send_message_self(buffer_out, pcli->connfd);
+                free(buffer_in);
             }
             else if (!strcmp(command, "/login"))
             {
                 if (1 == is_login)
                 {
                     send_message_self("<<already have other users logged in\n", pcli->connfd);
+                    free(buffer_in);
                     continue;
                 }
                 param1 = strtok(NULL, " "); /* uid */
@@ -554,6 +574,7 @@ void * handle_client(void * arg)
                 if (param1 == NULL || param2 == NULL)
                 {
                     send_message_self("<< uid or password cannot be null\n", pcli->connfd);
+                    free(buffer_in);
                     continue;
                 }
 
@@ -563,24 +584,28 @@ void * handle_client(void * arg)
                 if (0 == status)
                 {
                     /* 需要修改在线列表中的 uid 和 name，列表 client_t 是复制了一份 */
-                    if (NULL == online_modify(pcli->uid, uid, pcli->name))
+                    if (NULL == online_modify(pcli->uid, uid, pcli->name)) /* 这个 uid 已经登入了 */
                     {
                         sprintf(buffer_out, "<< %s (%d) has logged in\n", pcli->name, uid);
                         send_message_self(buffer_out, pcli->connfd);
+                        free(buffer_in);
                         continue;
                     }
                     pcli->uid = uid; /* 修改完列表，再修改当前 client_t 信息 */
                     is_login = 1; /* 登入成功 */
                     sprintf(buffer_out, "<< login successfully with %s (%d)\n", pcli->name, pcli->uid);
                     send_message_self(buffer_out, pcli->connfd);
+                    free(buffer_in);
                 }
                 else if (1 == status)
                 {
                     send_message_self("<< uid and password do not match\n", pcli->connfd);
+                    free(buffer_in);
                 }
                 else
                 {
                     send_message_self("<< uid not found\n", pcli->connfd);
+                    free(buffer_in);
                 }
 
             }
@@ -589,6 +614,7 @@ void * handle_client(void * arg)
                 if (!is_login)
                 {
                     send_message_self("<< login first or register\n", pcli->connfd);
+                    free(buffer_in);
                     continue;
                 }
                 param1 = strtok(NULL, " ");
@@ -596,6 +622,7 @@ void * handle_client(void * arg)
                 if (param1 == NULL || param2 == NULL)
                 {
                     send_message_self("<< uid or message cannot be null\n", pcli->connfd);
+                    free(buffer_in);
                     continue;
                 }
 
@@ -612,32 +639,39 @@ void * handle_client(void * arg)
                     sprintf(buffer_out, "uid %d is not online\n", uid);
                     send_message_self(buffer_out, pcli->connfd);
                 }
+                free(buffer_in);
             }
             else if (!strcmp(command, "/list"))
             {
                 if (!is_login)
                 {
                     send_message_self("<< login first or register\n", pcli->connfd);
+                    free(buffer_in);
                     continue;
                 }
                 send_active_clients(pcli->connfd);
+                free(buffer_in);
             }
             else if (!strcmp(command, "/nick"))
             {
                 if (!is_login)
                 {
                     send_message_self("<< login first or register\n", pcli->connfd);
+                    free(buffer_in);
                     continue;
                 }
                 param1 = strtok(NULL, " ");
                 if (param1 == NULL)
                 {
                     send_message_self("<< name cannot be null\n", pcli->connfd);
+                    free(buffer_in);
+                    break;
                 }
                 char * oldname = s_strdup(pcli->name);
                 if (!oldname)
                 {
                     log_error("cannot allocate memory for name: %s", strerror(errno));
+                    free(buffer_in);
                     continue;
                 }
                 modify_pwd_name(pcli->uid, NULL, param1); /* TODO: 错误检查 */
@@ -646,21 +680,26 @@ void * handle_client(void * arg)
                 sprintf(buffer_out, "<< %s is now konwn as %s\n", oldname, pcli->name);
                 free(oldname);
                 send_message_self(buffer_out, pcli->connfd);
+                free(buffer_in);
             }
             else if (!strcmp(command, "/pwd"))
             {
                 if (!is_login)
                 {
                     send_message_self("<< login first or register\n", pcli->connfd);
+                    free(buffer_in);
                     continue;
                 }
                 param1 = strtok(NULL, " ");
                 if (param1 == NULL)
                 {
-                    send_message_self("<< name cannot be null\n", pcli->connfd);
+                    send_message_self("<< password cannot be null\n", pcli->connfd);
+                    free(buffer_in);
+                    break;
                 }
                 modify_pwd_name(pcli->uid, param1, NULL); /* TODO: 错误检查 */
                 send_message_self("<< reset password successfully\n", pcli->connfd);
+                free(buffer_in);
             }
             else if (!strcmp(command, "/help"))
             {
@@ -672,10 +711,12 @@ void * handle_client(void * arg)
                 strcat(buffer_out, "<< /nick      <name> Change nickname\n");
                 strcat(buffer_out, "<< /pwd       <password> Reset password\n");
                 send_message_self(buffer_out, pcli->connfd);
+                free(buffer_in);
             }
             else
             {
                 send_message_self("<< unkown command\n", pcli->connfd);
+                free(buffer_in);
             }
         }
         else
@@ -683,10 +724,12 @@ void * handle_client(void * arg)
             if (!is_login)
             {
                 send_message_self("<< login first or register\n", pcli->connfd);
+                free(buffer_in);
                 continue;
             }
             snprintf(buffer_out, sizeof(buffer_out), "[%d] (%s) %s\n", pcli->uid, pcli->name, buffer_in);
             send_message(buffer_out, pcli->uid);
+            free(buffer_in);
         }
     }
 
