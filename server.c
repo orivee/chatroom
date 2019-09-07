@@ -5,11 +5,12 @@
 #include <errno.h>
 #include <time.h>
 #include <stdarg.h>
+#include <mysql.h>
 
 #include "log.h"
 
 #define BUFFER_SZ 2048
-#define STRMAX 31
+#define STRMAX 51
 #define BACKLOG 5
 #define EVMAX 100
 
@@ -19,8 +20,9 @@ typedef struct
     char config[STRMAX];    /* configuration file */
     char ip[STRMAX];        /* server socket bind ip address */
     char logpath[STRMAX];   /* log file pathname */
-    int quiet;             /* quiet mode */
     int port;               /* server socket bind port */
+    int quiet;              /* quiet mode */
+    int storage;           /* register user storage type 1: file; 2: mysql*/
 } config_t;
 
 /* init config paramters */
@@ -29,8 +31,9 @@ static config_t configs =
     "server.conf",
     "127.0.0.1",
     "",
+    7000,
     0,
-    7000
+    1
 };
 
 /* user info structure */
@@ -47,7 +50,7 @@ typedef struct {
     struct sockaddr_in addr; /* Client remote address */
     int connfd;              /* Connection file descriptor */
     int uid;                 /* Client unique identifier */
-    char name[32];           /* Client name */
+    char name[51];           /* Client name */
 } client_t;
 
 /* online users list */
@@ -60,6 +63,25 @@ typedef online_t * ol_uids_t;
 ol_uids_t ol_uids = NULL; /* online list head */
 
 pthread_mutex_t clients_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+typedef struct {
+    char hostname[51];
+    char username[51];
+    char password[51];
+    char database[51];
+    int port;
+} mysql_config_t;
+
+mysql_config_t mysql_config =
+{
+    "localhost",
+    "root",
+    "root",
+    "",
+    3306
+};
+
+MYSQL * mysql_conn;
 
 /* string duplication */
 char * s_strdup(const char * s)
@@ -137,6 +159,145 @@ void read_server_config()
 
     /* printf("config: addr: %s, port: %d, logpath: %s\n", */
     /*         configs.ip, configs.port, configs.logpath); */
+}
+
+void mysql_set_connect()
+{
+    if (mysql_library_init(0, NULL, NULL))
+    {
+        fprintf(stderr, "count not initialize MySQL client library\n");
+        exit(EXIT_FAILURE);
+    }
+
+    mysql_conn = mysql_init(NULL);
+
+    if (NULL == mysql_conn)
+    {
+        fprintf(stderr, "cloud not create database connection: %s\n", mysql_error(mysql_conn));
+        exit(EXIT_FAILURE);
+    }
+
+    printf("mysql_connect ...\n");
+    if (!mysql_real_connect(mysql_conn, NULL, "root", "root", NULL, 0, NULL, 0))
+    {
+        fprintf(stderr, "cloud not connect database: %s\n", mysql_error(mysql_conn));
+        exit(EXIT_FAILURE);
+    }
+
+}
+
+void mysql_create_db_table()
+{
+    printf("create database ...\n");
+    /* printf("rest: %d\n", mysql_query(mysql_conn, "CREATE DATABASE IF NOT EXISTS chatroom")); */
+    if (mysql_query(mysql_conn, "CREATE DATABASE IF NOT EXISTS chatroom") != 0)
+    {
+        fprintf(stderr, "%s\n", mysql_error(mysql_conn));
+        exit(EXIT_FAILURE);
+    }
+
+    printf("select database ...\n");
+    if (mysql_select_db(mysql_conn, "chatroom") != 0)
+    {
+        fprintf(stderr, "%s\n", mysql_error(mysql_conn));
+        exit(EXIT_FAILURE);
+    }
+
+    printf("create table ...\n");
+    const char * stmt = "CREATE TABLE IF NOT EXISTS register_user \
+                         ( uid INT(8) NOT NULL UNIQUE AUTO_INCREMENT, \
+                           name VARCHAR(51) NOT NULL DEFAULT \"annoymous\", \
+                           password VARCHAR(51) NOT NULL, \
+                           PRIMARY KEY (uid) \
+                         ) ENGINE=InnoDB, AUTO_INCREMENT = 100";
+    if (mysql_query(mysql_conn, stmt) != 0)
+    {
+        fprintf(stderr, "%s\n", mysql_error(mysql_conn));
+    }
+}
+
+void mysql_insert_user(const char * pwd, const char * name)
+{
+    char stmt[512];
+    if (NULL == name || 0 == strlen(name))
+    {
+        sprintf(stmt, "INSERT INTO register_user \
+                (password) VALUES ('%s')", pwd);
+    }
+    else
+    {
+        sprintf(stmt, "INSERT INTO register_user \
+                (name, password) VALUES ('%s', '%s')", name, pwd);
+    }
+    printf("stmt: %s\n", stmt);
+    if (mysql_query(mysql_conn, stmt) != 0)
+    {
+        fprintf(stderr, "new user register failed: %s\n", mysql_error(mysql_conn));
+    }
+
+    uid = mysql_insert_id(mysql_conn);
+}
+
+int mysql_verify_uid_pwd(const int uid, const char * pwd, char * name)
+{
+    char stmt[512];
+    MYSQL_RES * result;
+    MYSQL_ROW row;
+
+    sprintf(stmt, "SELECT password, name FROM register_user \
+            WHERE uid = %d", uid);
+
+    if (mysql_query(mysql_conn, stmt) != 0)
+    {
+        fprintf(stderr, "mysql query failed: %s", mysql_error(mysql_conn));
+        return -2;
+    }
+
+    result = mysql_store_result(mysql_conn);
+    if (result == NULL)
+    {
+        fprintf(stderr, "mysql storing result failed: %s", mysql_error(mysql_conn));
+        return -2;
+    }
+
+    row = mysql_fetch_row(result);
+    if (row == NULL)
+        return -1;
+    if (!strcmp(row[0], pwd))
+    {
+        strcpy(name, row[1]);
+        return 0;
+    }
+    else
+        return 1;
+}
+
+void mysql_update_pwd_name(const int uid, const char * pwd, const char * name)
+{
+    char stmt[512];
+    if (pwd && name)
+    {
+        sprintf(stmt, "UPDATE register_user \
+                SET password = '%s', name = '%s' \
+                WHERE uid = %d", pwd, name, uid);
+    }
+    else if (pwd)
+    {
+        sprintf(stmt, "UPDATE register_user \
+                SET password = '%s' \
+                WHERE uid = %d", pwd, uid);
+    }
+    else if (name)
+    {
+        sprintf(stmt, "UPDATE register_user \
+                SET name = '%s' \
+                WHERE uid = %d", name, uid);
+    }
+
+    if (mysql_query(mysql_conn, stmt) != 0)
+    {
+        fprintf(stderr, "mysql query failed: %s", mysql_error(mysql_conn));
+    }
 }
 
 /* uid initialization */
@@ -556,7 +717,9 @@ void * handle_client(void * arg)
                     break;
                 }
 
-                save_uid_pwd(pcli->uid, param1, param2); /* TODO: 错误检查 */
+                // save_uid_pwd(pcli->uid, param1, param2); /* TODO: 错误检查 */
+                mysql_insert_user(param1, param2);
+                pcli->uid = uid;
                 sprintf(buffer_out, "<< resgister successfully with %d\n", pcli->uid);
                 send_message_self(buffer_out, pcli->connfd);
                 free(buffer_in);
@@ -565,7 +728,7 @@ void * handle_client(void * arg)
             {
                 if (1 == is_login)
                 {
-                    send_message_self("<<already have other users logged in\n", pcli->connfd);
+                    send_message_self("<< already have other users logged in\n", pcli->connfd);
                     free(buffer_in);
                     continue;
                 }
@@ -580,7 +743,10 @@ void * handle_client(void * arg)
 
                 int uid = atoi(param1); /* TODO: 输入检查 */
 
+                /*
                 int status = verify_uid_pwd(uid, param2, pcli->name);
+                */
+                int status = mysql_verify_uid_pwd(uid, param2, pcli->name);
                 if (0 == status)
                 {
                     /* 需要修改在线列表中的 uid 和 name，列表 client_t 是复制了一份 */
@@ -602,7 +768,7 @@ void * handle_client(void * arg)
                     send_message_self("<< uid and password do not match\n", pcli->connfd);
                     free(buffer_in);
                 }
-                else
+                else if (-1 == status)
                 {
                     send_message_self("<< uid not found\n", pcli->connfd);
                     free(buffer_in);
@@ -674,7 +840,8 @@ void * handle_client(void * arg)
                     free(buffer_in);
                     continue;
                 }
-                modify_pwd_name(pcli->uid, NULL, param1); /* TODO: 错误检查 */
+                // modify_pwd_name(pcli->uid, NULL, param1); /* TODO: 错误检查 */
+                mysql_update_pwd_name(pcli->uid, NULL, param1);
                 online_modify(pcli->uid, 0, param1);
                 strcpy(pcli->name, param1);
                 sprintf(buffer_out, "<< %s is now konwn as %s\n", oldname, pcli->name);
@@ -697,7 +864,8 @@ void * handle_client(void * arg)
                     free(buffer_in);
                     break;
                 }
-                modify_pwd_name(pcli->uid, param1, NULL); /* TODO: 错误检查 */
+                // modify_pwd_name(pcli->uid, param1, NULL); /* TODO: 错误检查 */
+                mysql_update_pwd_name(pcli->uid, param1, NULL);
                 send_message_self("<< reset password successfully\n", pcli->connfd);
                 free(buffer_in);
             }
@@ -820,6 +988,10 @@ int main(int argc, char * argv[])
     log_info("load server config from command arguments");
     log_info("config: addr: %s, port: %d, logpath: %s",
             configs.ip, configs.port, configs.logpath);
+
+    /* initialize database */
+    mysql_set_connect();
+    mysql_create_db_table();
 
     /* read user database file */
     uid_init();

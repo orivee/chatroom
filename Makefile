@@ -1,6 +1,7 @@
 objects =
-CFLAGS = -Wall -pthread
+CFLAGS = -Wall -pthread -I/usr/include/mysql -I/usr/include/mysql/mysql
 LDFLAGS = -pthread
+LDLIBS = -L/usr/lib/ -lmariadb
 CC=gcc
 
 all: server client
