@@ -322,13 +322,13 @@ void uid_init()
 
     while (fread(&user_info, sizeof(user_info_t), 1, fp)) /* stop after an EOF or a newline */
     {
-        printf("saved user: %d %s %s\n", user_info.uid, user_info.passwd, user_info.name);
+        /* printf("saved user: %d %s %s\n", user_info.uid, user_info.passwd, user_info.name); */
         if (user_info.uid > uid)
             uid = user_info.uid;
     }
 
     uid = uid + 1;
-    log_debug("init uid: %d", uid);
+    /* log_debug("init uid: %d", uid); */
     fclose(fp);
 }
 
@@ -395,6 +395,8 @@ client_t * accept_client(int * plistenfd, int * pconnfd)
     cli->uid = uid++;
     strcpy(cli->name, "anonymous");
 
+    log_debug("accept uid: %d", uid);
+
     return cli;
 }
 
@@ -455,12 +457,12 @@ online_t * online_modify(int uid, int newuid, const char * newname)
         if (online->client.uid == uid)
         {
             if (found == NULL)
-            {
                 found = online;
-            }
         }
         if (online->client.uid == newuid)
         {
+            if (uid == newuid)
+                break;
             pthread_mutex_unlock(&clients_mutex);
             return NULL; /* already login */
         }
@@ -600,7 +602,7 @@ int verify_uid_pwd(const int uid, const char * pwd, char * name)
     FILE * fp = fopen("./users.db", "rb");
     while (fread(&user_info, sizeof(user_info_t), 1, fp)) /* stop after an EOF or a newline */
     {
-        printf("saved user: %d %s %s\n", user_info.uid, user_info.passwd, user_info.name);
+        /* printf("saved user: %d %s %s\n", user_info.uid, user_info.passwd, user_info.name); */
         if (user_info.uid== uid)
         {
             if (!strcmp(user_info.passwd, pwd))
@@ -621,7 +623,7 @@ int verify_uid_pwd(const int uid, const char * pwd, char * name)
     return -1; /* uid not found*/
 }
 
-void save_uid_pwd(const int uid, const char * pwd, const char * name)
+void save_uid_pwd(int uid, const char * pwd, const char * name)
 {
     user_info_t user_info;
     user_info.uid = uid;
@@ -634,12 +636,12 @@ void save_uid_pwd(const int uid, const char * pwd, const char * name)
     {
         strcpy(user_info.name, "annoymous");
     }
-
-    printf("saved user: %d %s %s\n", user_info.uid, user_info.passwd, user_info.name);
     FILE * fp = fopen("./users.db", "ab");
+
+    /* printf("saved user: %d %s %s\n", user_info.uid, user_info.passwd, user_info.name); */
     if (fwrite(&user_info, sizeof(user_info_t), 1, fp) != 1)
     {
-        fprintf(stderr, "save user failed\n");
+        log_error("save user failed");
         ferror(fp);
     }
     fclose(fp);
@@ -902,11 +904,11 @@ void * handle_client(void * arg)
 
                 if (configs.storage == 'd')
                 {
-                    modify_pwd_name(pcli->uid, param1, NULL); /* TODO: 错误检查 */
+                    mysql_update_pwd_name(pcli->uid, param1, NULL);
                 }
                 else
                 {
-                    mysql_update_pwd_name(pcli->uid, param1, NULL);
+                    modify_pwd_name(pcli->uid, param1, NULL); /* TODO: 错误检查 */
                 }
 
                 send_message_self("<< reset password successfully\n", pcli->connfd);
@@ -1056,8 +1058,7 @@ int main(int argc, char * argv[])
     else
     {
         /* read user database file */
-        /* uid_init(); */
-        uid = 200;
+        uid_init();
         /* printf("init uid: %d\n", uid); */
         log_info("user storing uses by file");
     }
