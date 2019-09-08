@@ -447,7 +447,7 @@ client_t * accept_client(int * plistenfd, int * pconnfd)
     cli->uid = uid++;
     strcpy(cli->name, "anonymous");
 
-    log_debug("accept uid: %d", uid);
+    /* log_debug("accept uid: %d", uid); */
 
     return cli;
 }
@@ -818,29 +818,31 @@ void * handle_client(void * arg)
                 }
 
                 int uid = atoi(param1); /* TODO: 输入检查 */
+                char login_name[STRMAX]; /* 临时存储登入用户的名字 */
 
                 int status;
                 if (configs.storage == 'd')
                 {
                     /* printf("login mysql query\n"); */
-                    status = mysql_verify_uid_pwd(uid, param2, pcli->name);
+                    status = mysql_verify_uid_pwd(uid, param2, login_name);
                     /* printf("stauts: %d\n", status); */
                 }
                 else
                 {
-                    status = verify_uid_pwd(uid, param2, pcli->name);
+                    status = verify_uid_pwd(uid, param2, login_name);
                 }
                 if (0 == status)
                 {
                     /* 需要修改在线列表中的 uid 和 name，列表 client_t 是复制了一份 */
-                    if (NULL == online_modify(pcli->uid, uid, pcli->name)) /* 这个 uid 已经登入了 */
+                    if (NULL == online_modify(pcli->uid, uid, login_name)) /* 这个 uid 已经登入了 */
                     {
-                        sprintf(buffer_out, "<< %s (%d) has logged in\n", pcli->name, uid);
+                        sprintf(buffer_out, "<< %s (%d) has logged in\n", login_name, uid);
                         send_message_self(buffer_out, pcli->connfd);
                         free(buffer_in);
                         continue;
                     }
                     pcli->uid = uid; /* 修改完列表，再修改当前 client_t 信息 */
+                    strcpy(pcli->name, login_name);
                     is_login = 1; /* 登入成功 */
                     sprintf(buffer_out, "<< login successfully with %s (%d)\n", pcli->name, pcli->uid);
                     send_message_self(buffer_out, pcli->connfd);
