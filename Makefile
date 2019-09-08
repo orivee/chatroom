@@ -8,7 +8,7 @@ all: server client
 .PHONEY: all
 
 server: server.o msgprot.o log.o
-client: client.o msgprot.o
+client: client.o msgprot.o log.o
 
 server.o: server.c
 client.o: client.c

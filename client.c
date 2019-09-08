@@ -1,8 +1,135 @@
 #include "commons.h"
+#include "log.h"
+#include <getopt.h>
+#include <stdarg.h>
+#include <errno.h>
 
-#define SERVER_ADDR "127.0.0.1"
-#define SERVER_PORT 7000
 #define BUFFER_SZ 2048
+
+/* config structure */
+typedef struct
+{
+    char config[51];        /* configuration file */
+    char ip[51];            /* server socket bind ip address */
+    int port;               /* server socket bind port */
+} config_t;
+
+config_t configs =
+{
+    "",
+    "127.0.0.1",
+    7777
+};
+
+/* parse a row config */
+int parse_line(char * buf)
+{
+    if (buf == NULL)
+        return -1;
+
+    char * varname, * value, * cmnt;
+    const char * sep = " ";
+
+    varname = strtok(buf, sep);
+    if (varname == NULL)
+        return -1;
+    if ('#' == varname[0])
+        return 0;
+
+    value = strtok(NULL, sep);
+    if (value == NULL)
+        return -1;
+    int slen = strlen(value);
+    if ('\n' == value[slen-1])
+        value[slen-1] = '\0';
+
+    cmnt = strtok(NULL, sep);
+    if (cmnt != NULL && cmnt[0] != '#')
+        return -1;
+    else if (0 == strcmp(varname, "server_address"))
+        strcpy(configs.ip, value);
+    else if (0 == strcmp(varname, "server_port"))
+        configs.port = atoi(value);
+    else
+        return -1;
+
+    return 0;
+}
+
+/* read client config */
+void read_client_config()
+{
+    FILE * fp = fopen("./client.conf", "r");
+    if (NULL == fp)
+    {
+        log_error("opening config failed: %s", strerror(errno));
+        exit(EXIT_FAILURE);
+    }
+
+    char fconfig[BUFFER_SZ];
+
+    while (fgets(fconfig, BUFFER_SZ, fp) != NULL)
+    {
+        /* printf("config: %ld %s", strlen(fconfig), fconfig); */
+        if (1 == strlen(fconfig) && '\n' == fconfig[0])
+            continue;
+
+        if (-1 == parse_line(fconfig))
+        {
+            log_error("configuration syntax or value error");
+            exit(EXIT_FAILURE);
+        }
+    }
+
+    /* printf("config: addr: %s, port: %d\n", */
+    /*         configs.ip, configs.port); */
+}
+
+void load_arguments(int argc, char ** argv)
+{
+    struct option long_options[] =
+    {
+        {"help", no_argument, 0, 'h'},
+        {"config", required_argument, 0, 'f'},
+        {"bind_ip", required_argument, 0, 'i'},
+        {"port", required_argument, 0, 'p'},
+    };
+
+    int c;
+    int option_index = 0;
+
+    while (1)
+    {
+        c = getopt_long(argc, argv, "hf:i:p:", long_options, &option_index);
+
+        if (-1 == c)
+            break;
+
+        switch (c)
+        {
+            case 'h':
+                printf("Usage: %s [options]\n", argv[0]);
+                printf("options:\n");
+                printf("\t--help, -h\n\t\tshow help information\n");
+                printf("\t--config <filename>, -f <filename>\n\t\tspecify configure file\n");
+                printf("\t--bind_ip <ipaddress>, -i <ipaddress>\n");
+                printf("\t--port <port>, -p <port>\n");
+                exit(EXIT_FAILURE);
+            case 'f':
+                break;
+            case 'i':
+                if (optarg)
+                    strcpy(configs.ip, optarg);
+                break;
+            case 'p':
+                if (optarg)
+                    configs.port = atoi(optarg);
+                break;
+            default:
+                exit(EXIT_FAILURE);
+        }
+    }
+}
 
 void eatinput()
 {
@@ -41,8 +168,8 @@ void setup_client_connect(int * pconnfd)
         exit(EXIT_FAILURE);
     }
     serv_addr.sin_family = AF_INET;
-    serv_addr.sin_port = htons(SERVER_PORT);
-    if (0 == inet_pton(AF_INET, SERVER_ADDR, &serv_addr.sin_addr))
+    serv_addr.sin_port = htons(configs.port);
+    if (0 == inet_pton(AF_INET, configs.ip, &serv_addr.sin_addr))
     {
         fprintf(stderr, "server address converting failed");
         close(*pconnfd);
@@ -105,6 +232,15 @@ int main(int argc, char *argv[])
     int ev_avail = 0; /* event ready */
     char buffer_out[BUFFER_SZ];
     char * buffer_in = NULL;
+
+    /* read client config */
+    read_client_config();
+
+    /* load command arguments */
+    load_arguments(argc, argv);
+
+    /* printf("config: addr: %s, port: %d\n", */
+    /*         configs.ip, configs.port); */
 
     setup_client_connect(&connfd);
 
