@@ -43,7 +43,7 @@ typedef struct {
     char passwd[STRMAX];
 } user_info_t;
 
-static int uid = 0;
+static int uid = 99;
 
 /* client structure */
 typedef struct {
@@ -174,7 +174,7 @@ void mysql_set_connect()
 {
     if (mysql_library_init(0, NULL, NULL))
     {
-        fprintf(stderr, "count not initialize MySQL client library\n");
+        log_error("count not initialize MySQL client library");
         exit(EXIT_FAILURE);
     }
 
@@ -182,14 +182,14 @@ void mysql_set_connect()
 
     if (NULL == mysql_conn)
     {
-        fprintf(stderr, "cloud not create database connection: %s\n", mysql_error(mysql_conn));
+        log_error("cloud not create database connection: %s", mysql_error(mysql_conn));
         exit(EXIT_FAILURE);
     }
 
-    printf("mysql_connect ...\n");
+    log_info("mysql_connect");
     if (!mysql_real_connect(mysql_conn, NULL, "root", "root", NULL, 0, NULL, 0))
     {
-        fprintf(stderr, "cloud not connect database: %s\n", mysql_error(mysql_conn));
+        log_error("cloud not connect database: %s", mysql_error(mysql_conn));
         exit(EXIT_FAILURE);
     }
 
@@ -197,22 +197,22 @@ void mysql_set_connect()
 
 void mysql_create_db_table()
 {
-    printf("create database ...\n");
+    log_info("create database if not exists");
     /* printf("rest: %d\n", mysql_query(mysql_conn, "CREATE DATABASE IF NOT EXISTS chatroom")); */
     if (mysql_query(mysql_conn, "CREATE DATABASE IF NOT EXISTS chatroom") != 0)
     {
-        fprintf(stderr, "%s\n", mysql_error(mysql_conn));
+        log_error("%s", mysql_error(mysql_conn));
         exit(EXIT_FAILURE);
     }
 
-    printf("select database ...\n");
+    log_info("select database chatroom");
     if (mysql_select_db(mysql_conn, "chatroom") != 0)
     {
-        fprintf(stderr, "%s\n", mysql_error(mysql_conn));
+        log_error("%s", mysql_error(mysql_conn));
         exit(EXIT_FAILURE);
     }
 
-    printf("create table ...\n");
+    log_info("create table if not exists");
     const char * stmt = "CREATE TABLE IF NOT EXISTS register_user \
                          ( uid INT(8) NOT NULL UNIQUE AUTO_INCREMENT, \
                            name VARCHAR(51) NOT NULL DEFAULT \"annoymous\", \
@@ -221,30 +221,30 @@ void mysql_create_db_table()
                          ) ENGINE=InnoDB, AUTO_INCREMENT = 100";
     if (mysql_query(mysql_conn, stmt) != 0)
     {
-        fprintf(stderr, "%s\n", mysql_error(mysql_conn));
+        log_error("%s", mysql_error(mysql_conn));
     }
 }
 
-void mysql_insert_user(const char * pwd, const char * name)
+void mysql_insert_user(int uid, const char * pwd, const char * name)
 {
     char stmt[512];
     if (NULL == name || 0 == strlen(name))
     {
         sprintf(stmt, "INSERT INTO register_user \
-                (password) VALUES ('%s')", pwd);
+                (uid, password) VALUES (%d, '%s')", uid, pwd);
     }
     else
     {
         sprintf(stmt, "INSERT INTO register_user \
-                (name, password) VALUES ('%s', '%s')", name, pwd);
+                (uid, name, password) VALUES (%d, '%s', '%s')", uid, name, pwd);
     }
     printf("stmt: %s\n", stmt);
     if (mysql_query(mysql_conn, stmt) != 0)
     {
-        fprintf(stderr, "new user register failed: %s\n", mysql_error(mysql_conn));
+        log_error("new user register failed: %s", mysql_error(mysql_conn));
     }
 
-    uid = mysql_insert_id(mysql_conn);
+    /* uid = mysql_insert_id(mysql_conn); */
 }
 
 int mysql_verify_uid_pwd(const int uid, const char * pwd, char * name)
@@ -258,14 +258,14 @@ int mysql_verify_uid_pwd(const int uid, const char * pwd, char * name)
 
     if (mysql_query(mysql_conn, stmt) != 0)
     {
-        fprintf(stderr, "mysql query failed: %s", mysql_error(mysql_conn));
+        log_error("mysql query failed: %s", mysql_error(mysql_conn));
         return -2;
     }
 
     result = mysql_store_result(mysql_conn);
     if (result == NULL)
     {
-        fprintf(stderr, "mysql storing result failed: %s", mysql_error(mysql_conn));
+        log_error("mysql storing result failed: %s", mysql_error(mysql_conn));
         return -2;
     }
 
@@ -305,7 +305,7 @@ void mysql_update_pwd_name(const int uid, const char * pwd, const char * name)
 
     if (mysql_query(mysql_conn, stmt) != 0)
     {
-        fprintf(stderr, "mysql query failed: %s", mysql_error(mysql_conn));
+        log_error("mysql query failed: %s", mysql_error(mysql_conn));
     }
 }
 
@@ -330,6 +330,42 @@ void uid_init()
     uid = uid + 1;
     /* log_debug("init uid: %d", uid); */
     fclose(fp);
+}
+
+/* MySQL uid initialization */
+void mysql_uid_init()
+{
+    char stmt[512];
+    MYSQL_RES * result;
+    MYSQL_ROW row;
+
+    sprintf(stmt, "SELECT uid FROM register_user \
+            ORDER BY uid DESC \
+            LIMIT 1");
+    if (mysql_query(mysql_conn, stmt) != 0)
+    {
+        log_error("mysql query failed: %s", mysql_error(mysql_conn));
+        exit(EXIT_FAILURE);
+    }
+
+    result = mysql_store_result(mysql_conn);
+    if (result == NULL)
+    {
+        log_error("mysql storing result failed: %s", mysql_error(mysql_conn));
+        exit(EXIT_FAILURE);
+    }
+
+    row = mysql_fetch_row(result);
+    if (row == NULL)
+    {
+        uid = uid + 1;
+    }
+    else
+    {
+        uid = atoi(row[0]) + 1;
+    }
+
+    /* log_debug("mysql uid init: %d", uid); */
 }
 
 void setup_server_listen(int * plistenfd)
@@ -738,8 +774,7 @@ void * handle_client(void * arg)
 
                 if (configs.storage == 'd')
                 {
-                    mysql_insert_user(param1, param2);
-                    pcli->uid = uid;
+                    mysql_insert_user(pcli->uid, param1, param2);
                 }
                 else
                 {
@@ -771,7 +806,9 @@ void * handle_client(void * arg)
                 int status;
                 if (configs.storage == 'd')
                 {
+                    /* printf("login mysql query\n"); */
                     status = mysql_verify_uid_pwd(uid, param2, pcli->name);
+                    /* printf("stauts: %d\n", status); */
                 }
                 else
                 {
@@ -1050,17 +1087,18 @@ int main(int argc, char * argv[])
     /* user storage type */
     if (configs.storage == 'd')
     {
+        log_info("user storing uses by MySQL");
         /* initialize database */
         mysql_set_connect();
         mysql_create_db_table();
-        log_info("user storing uses by MySQL");
+        mysql_uid_init();
     }
     else
     {
+        log_info("user storing uses by file");
         /* read user database file */
         uid_init();
         /* printf("init uid: %d\n", uid); */
-        log_info("user storing uses by file");
     }
 
     setup_server_listen(&listenfd);
