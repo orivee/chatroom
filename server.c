@@ -6,6 +6,9 @@
 #include <time.h>
 #include <stdarg.h>
 #include <mysql.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <fcntl.h>
 
 #include "log.h"
 
@@ -22,6 +25,7 @@ typedef struct
     char logpath[STRMAX];   /* log file pathname */
     int port;               /* server socket bind port */
     int quiet;              /* quiet mode */
+    int daemon;             /* run as daemon*/
     char storage;           /* register user storage type f: file; d: mysql*/
 } config_t;
 
@@ -32,6 +36,7 @@ static config_t configs =
     "127.0.0.1",
     "",
     7000,
+    0,
     0,
     'f'
 };
@@ -132,6 +137,17 @@ int parse_line(char * buf)
             configs.storage = 'f';
         else if (!strcmp(value, "mysql"))
             configs.storage = 'd';
+        else
+            return -1;
+    }
+    else if (0 == strcmp(varname, "daemon"))
+    {
+        if (!strcmp(value, "1"))
+            configs.daemon = 1;
+        else if (!strcmp(value, "0"))
+        {
+            configs.daemon = 0;
+        }
         else
             return -1;
     }
@@ -1057,11 +1073,43 @@ void load_arguments(int argc, char ** argv)
                     strcpy(configs.logpath, optarg);
                 break;
             case 'd':
+                configs.daemon = 1;
                 break;
             default:
                 exit(EXIT_FAILURE);
         }
     }
+}
+
+int become_daemon()
+{
+    int fd;
+
+    switch (fork())                 /* become backgroud process */
+    {
+        case -1: return -1;
+        case 0: break;
+        default: exit(EXIT_SUCCESS);
+    }
+
+    if (-1 == setsid())             /* become leader of new session */
+        return -1;
+
+    umask(0);                       /* clear file mode creation mask */
+    chdir("/");                     /* change to root directory */
+
+    close(STDIN_FILENO);            /* reopen standard fd's to /dev/null */
+
+    fd = open("/dev/null", O_RDWR);
+
+    if (fd != STDIN_FILENO)
+        return -1;
+    if (dup2(STDIN_FILENO, STDOUT_FILENO) != STDOUT_FILENO)
+        return -1;
+    if (dup2(STDIN_FILENO, STDERR_FILENO) != STDERR_FILENO)
+        return -1;
+
+    return 0;
 }
 
 int main(int argc, char * argv[])
@@ -1074,6 +1122,9 @@ int main(int argc, char * argv[])
 
     /* load command arguments */
     load_arguments(argc, argv);
+
+    if (configs.daemon == 1)
+        become_daemon();
 
     /* open log file */
     log_set_fp(configs.logpath);
@@ -1125,6 +1176,5 @@ int main(int argc, char * argv[])
     {
         log_close_fp(configs.logpath);
     }
-
     return 0;
 }
