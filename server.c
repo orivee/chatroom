@@ -22,7 +22,7 @@ typedef struct
     char logpath[STRMAX];   /* log file pathname */
     int port;               /* server socket bind port */
     int quiet;              /* quiet mode */
-    int storage;           /* register user storage type 1: file; 2: mysql*/
+    char storage;           /* register user storage type f: file; d: mysql*/
 } config_t;
 
 /* init config paramters */
@@ -33,7 +33,7 @@ static config_t configs =
     "",
     7000,
     0,
-    1
+    'f'
 };
 
 /* user info structure */
@@ -126,6 +126,15 @@ int parse_line(char * buf)
         configs.port = atoi(value);
     else if (0 == strcmp(varname, "log_file"))
         strcpy(configs.logpath, value);
+    else if (0 == strcmp(varname, "storage_type"))
+    {
+        if (!strcmp(value, "file"))
+            configs.storage = 'f';
+        else if (!strcmp(value, "mysql"))
+            configs.storage = 'd';
+        else
+            return -1;
+    }
     else
         return -1;
 
@@ -152,7 +161,7 @@ void read_server_config()
 
         if (-1 == parse_line(fconfig))
         {
-            log_error("configuration syntax error");
+            log_error("configuration syntax or value error");
             exit(EXIT_FAILURE);
         }
     }
@@ -303,7 +312,7 @@ void mysql_update_pwd_name(const int uid, const char * pwd, const char * name)
 /* uid initialization */
 void uid_init()
 {
-    FILE * fp = fopen("./users.db", "r");
+    FILE * fp = fopen("./users.db", "a+b");
     if (NULL == fp)
     {
         log_error("users database open failed: %s", strerror(errno));
@@ -313,13 +322,14 @@ void uid_init()
 
     while (fread(&user_info, sizeof(user_info_t), 1, fp)) /* stop after an EOF or a newline */
     {
-        /* printf("saved user: %d %s %s\n", user_info.uid, user_info.passwd, user_info.name); */
+        printf("saved user: %d %s %s\n", user_info.uid, user_info.passwd, user_info.name);
         if (user_info.uid > uid)
             uid = user_info.uid;
     }
 
     uid = uid + 1;
-    /* log_debug("init uid: %d", uid); */
+    log_debug("init uid: %d", uid);
+    fclose(fp);
 }
 
 void setup_server_listen(int * plistenfd)
@@ -590,20 +600,23 @@ int verify_uid_pwd(const int uid, const char * pwd, char * name)
     FILE * fp = fopen("./users.db", "rb");
     while (fread(&user_info, sizeof(user_info_t), 1, fp)) /* stop after an EOF or a newline */
     {
-        /* printf("saved user: %d %s %s\n", user_info.uid, user_info.passwd, user_info.name); */
+        printf("saved user: %d %s %s\n", user_info.uid, user_info.passwd, user_info.name);
         if (user_info.uid== uid)
         {
             if (!strcmp(user_info.passwd, pwd))
             {
                 strcpy(name, user_info.name);
+                fclose(fp);
                 return 0; /* login successfully */
             }
             else
             {
+                fclose(fp);
                 return 1; /* uid and pwd not match */
             }
         }
     }
+    fclose(fp);
 
     return -1; /* uid not found*/
 }
@@ -622,9 +635,13 @@ void save_uid_pwd(const int uid, const char * pwd, const char * name)
         strcpy(user_info.name, "annoymous");
     }
 
-    /* printf("saved user: %d %s %s\n", user_info.uid, user_info.passwd, user_info.name); */
-    FILE * fp = fopen("./users.db", "a+b");
-    fwrite(&user_info, sizeof(user_info_t), 1, fp);
+    printf("saved user: %d %s %s\n", user_info.uid, user_info.passwd, user_info.name);
+    FILE * fp = fopen("./users.db", "ab");
+    if (fwrite(&user_info, sizeof(user_info_t), 1, fp) != 1)
+    {
+        fprintf(stderr, "save user failed\n");
+        ferror(fp);
+    }
     fclose(fp);
 }
 
@@ -665,7 +682,7 @@ void * handle_client(void * arg)
     client_t * pcli = (client_t *) arg;
 
     cli_info = print_client_addr(pcli->addr);
-    log_info("<< accept %s logged in with annoymous and referenced by %d", cli_info, pcli->uid);
+    log_info("<< accept %s client", cli_info);
     free(cli_info);
 
     /* pthread_mutex_lock(&clients_mutex); */
@@ -717,9 +734,15 @@ void * handle_client(void * arg)
                     break;
                 }
 
-                // save_uid_pwd(pcli->uid, param1, param2); /* TODO: 错误检查 */
-                mysql_insert_user(param1, param2);
-                pcli->uid = uid;
+                if (configs.storage == 'd')
+                {
+                    mysql_insert_user(param1, param2);
+                    pcli->uid = uid;
+                }
+                else
+                {
+                    save_uid_pwd(pcli->uid, param1, param2); /* TODO: 错误检查 */
+                }
                 sprintf(buffer_out, "<< resgister successfully with %d\n", pcli->uid);
                 send_message_self(buffer_out, pcli->connfd);
                 free(buffer_in);
@@ -743,10 +766,15 @@ void * handle_client(void * arg)
 
                 int uid = atoi(param1); /* TODO: 输入检查 */
 
-                /*
-                int status = verify_uid_pwd(uid, param2, pcli->name);
-                */
-                int status = mysql_verify_uid_pwd(uid, param2, pcli->name);
+                int status;
+                if (configs.storage == 'd')
+                {
+                    status = mysql_verify_uid_pwd(uid, param2, pcli->name);
+                }
+                else
+                {
+                    status = verify_uid_pwd(uid, param2, pcli->name);
+                }
                 if (0 == status)
                 {
                     /* 需要修改在线列表中的 uid 和 name，列表 client_t 是复制了一份 */
@@ -840,8 +868,15 @@ void * handle_client(void * arg)
                     free(buffer_in);
                     continue;
                 }
-                // modify_pwd_name(pcli->uid, NULL, param1); /* TODO: 错误检查 */
-                mysql_update_pwd_name(pcli->uid, NULL, param1);
+
+                if (configs.storage == 'd')
+                {
+                    mysql_update_pwd_name(pcli->uid, NULL, param1);
+                }
+                else
+                {
+                    modify_pwd_name(pcli->uid, NULL, param1); /* TODO: 错误检查 */
+                }
                 online_modify(pcli->uid, 0, param1);
                 strcpy(pcli->name, param1);
                 sprintf(buffer_out, "<< %s is now konwn as %s\n", oldname, pcli->name);
@@ -864,8 +899,16 @@ void * handle_client(void * arg)
                     free(buffer_in);
                     break;
                 }
-                // modify_pwd_name(pcli->uid, param1, NULL); /* TODO: 错误检查 */
-                mysql_update_pwd_name(pcli->uid, param1, NULL);
+
+                if (configs.storage == 'd')
+                {
+                    modify_pwd_name(pcli->uid, param1, NULL); /* TODO: 错误检查 */
+                }
+                else
+                {
+                    mysql_update_pwd_name(pcli->uid, param1, NULL);
+                }
+
                 send_message_self("<< reset password successfully\n", pcli->connfd);
                 free(buffer_in);
             }
@@ -917,6 +960,7 @@ void load_arguments(int argc, char ** argv)
         {"config", required_argument, 0, 'f'},
         {"bind_ip", required_argument, 0, 'i'},
         {"port", required_argument, 0, 'p'},
+        {"storage", required_argument, 0, 's'},
         {"quiet", no_argument, 0, 'q'},
         {"logpath", required_argument, 0, 'l'},
         {"daemon", no_argument, 0, 'd'}
@@ -927,7 +971,7 @@ void load_arguments(int argc, char ** argv)
 
     while (1)
     {
-        c = getopt_long(argc, argv, "hf:p:qi:l:d", long_options, &option_index);
+        c = getopt_long(argc, argv, "hf:p:s:qi:l:d", long_options, &option_index);
 
         if (-1 == c)
             break;
@@ -941,6 +985,7 @@ void load_arguments(int argc, char ** argv)
                 printf("\t--config <filename>, -f <filename>\n\t\tspecify configure file\n");
                 printf("\t--bind_ip <ipaddress>, -i <ipaddress>\n");
                 printf("\t--port <port>, -p <port>\n");
+                printf("\t--storage <type>, -s <type>\n");
                 printf("\t--quiet, -q\n");
                 printf("\t--logpath <path>, -l <path>\n");
                 printf("\t--daemon, -d\n");
@@ -954,6 +999,17 @@ void load_arguments(int argc, char ** argv)
             case 'i':
                 if (optarg)
                     strcpy(configs.ip, optarg);
+                break;
+            case 's':
+                if (optarg)
+                {
+                    if (!strcmp(optarg, "file"))
+                        configs.storage = 'f';
+                    else if (!strcmp(optarg, "mysql"))
+                        configs.storage = 'd';
+                    else
+                        exit(EXIT_FAILURE);
+                }
                 break;
             case 'q':
                 configs.quiet = 1;
@@ -989,13 +1045,22 @@ int main(int argc, char * argv[])
     log_info("config: addr: %s, port: %d, logpath: %s",
             configs.ip, configs.port, configs.logpath);
 
-    /* initialize database */
-    mysql_set_connect();
-    mysql_create_db_table();
-
-    /* read user database file */
-    uid_init();
-    /* printf("init uid: %d\n", uid); */
+    /* user storage type */
+    if (configs.storage == 'd')
+    {
+        /* initialize database */
+        mysql_set_connect();
+        mysql_create_db_table();
+        log_info("user storing uses by MySQL");
+    }
+    else
+    {
+        /* read user database file */
+        /* uid_init(); */
+        uid = 200;
+        /* printf("init uid: %d\n", uid); */
+        log_info("user storing uses by file");
+    }
 
     setup_server_listen(&listenfd);
 
@@ -1012,7 +1077,15 @@ int main(int argc, char * argv[])
         sleep(1);
     }
 
-    log_close_fp(configs.logpath);
+    if (configs.storage == 'f')
+    {
+        mysql_close(mysql_conn);
+        mysql_library_end();
+    }
+    else
+    {
+        log_close_fp(configs.logpath);
+    }
 
     return 0;
 }
