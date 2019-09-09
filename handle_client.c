@@ -26,7 +26,7 @@ void * handle_client(void * arg)
     int is_login = 0; /* 登入标志 0 未登入；1 登入 */
 
     client_t * pcli = (client_t *) arg;
-    printf("%s: %p\n", __FUNCTION__, pcli);
+    /* printf("%s: %p\n", __FUNCTION__, pcli); */
 
     cli_info = print_client_addr(pcli->addr);
     log_info("<< accept %s client", cli_info);
@@ -363,7 +363,7 @@ void * client_alive(void * arg)
     {
         pthread_mutex_lock(&alive_mutex);
         --(pcli->alive);
-        printf("alive: %d\n", pcli->alive);
+        /* printf("alive: %d\n", pcli->alive); */
         pthread_mutex_unlock(&alive_mutex);
 
         if (0 == pcli->alive)

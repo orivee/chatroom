@@ -180,7 +180,7 @@ int main(int argc, char * argv[])
     while (1)
     {
         client_t * cli = accept_client(&listenfd, &connfd);
-        printf("%s: %p\n", __FUNCTION__, cli);
+        /* printf("%s: %p\n", __FUNCTION__, cli); */
 
         /* add client to online list and fork thread */
         online_add(cli);

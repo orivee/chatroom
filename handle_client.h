@@ -28,7 +28,6 @@ void * handle_client(void * arg);
 void * client_alive(void * arg);
 void online_add(client_t * pcli);
 void online_delete(int uid);
-/* online_t * online_modify(int uid, int newuid, const char * newname); */
 void send_message_self(const char * msg, int connfd);
 int send_message_client(const char * msg, int uid);
 void send_message(char * msg, int uid);

@@ -36,6 +36,20 @@ Enum:
 
 * [Print text instead of value from C enum](https://stackoverflow.com/q/3168306/3737970)
 * [How to define an enumerated type (enum) in C?](https://stackoverflow.com/q/1102542/3737970)
+
+Project Structure:
+
+* [how to structure a multi-file c program: part 1](https://opensource.com/article/19/7/structure-multi-file-c-part-1)
+* [how to structure your project · modern cmake](https://cliutils.gitlab.io/modern-cmake/chapters/basics/structure.html)
+* [structuring a c project](https://splone.com/blog/2016/1/4/structuring*a*c*project/)
+* [canonical project structure](http://open-std.org/jtc1/sc22/wg21/docs/papers/2018/p1204r0.html#abstract)
+* [jnyjny/meowmeow: meowmeow - a toy file encoder/decoder](https://github.com/jnyjny/meowmeow)
+* [kostrahb/generic-c-project: c project structure i use with makefiles](https://github.com/kostrahb/generic-c-project)
+* [is there a standard folder structure for programming projects? : c\_programming](https://www.reddit.com/r/c_programming/comments/3izgic/is_there_a_standard_folder_structure_for/)
+* [folder structure for a c project - software engineering stack exchange](https://softwareengineering.stackexchange.com/questions/379202/folder-structure-for-a-c-project)
+* [cs.swarthmore.edu/\~newhall/unixhelp/c\_codestyle.html](https://www.cs.swarthmore.edu/~newhall/unixhelp/c_codestyle.html)
+
+
 ## Solution
 
 **问题 1：** 如何实现客户端既能从服务端读取消息，也能接受终端输入发往服务器的消息？
