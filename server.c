@@ -94,6 +94,7 @@ client_t * accept_client(int * plistenfd, int * pconnfd)
     cli->addr = cli_addr;
     cli->connfd = *pconnfd;
     cli->uid = uid++;
+    cli->alive = 9;
     strcpy(cli->name, "anonymous");
 
     /* log_debug("accept uid: %d", uid); */
@@ -135,7 +136,7 @@ int become_daemon()
 int main(int argc, char * argv[])
 {
     int listenfd = 0, connfd = 0;
-    pthread_t tid;
+    pthread_t client_tid, alive_tid;
 
     /* read server config */
     read_server_config();
@@ -179,10 +180,12 @@ int main(int argc, char * argv[])
     while (1)
     {
         client_t * cli = accept_client(&listenfd, &connfd);
+        printf("%s: %p\n", __FUNCTION__, cli);
 
         /* add client to online list and fork thread */
         online_add(cli);
-        pthread_create(&tid, NULL, handle_client, (void *) cli);
+        pthread_create(&alive_tid, NULL, client_alive, (void *) cli);
+        pthread_create(&client_tid, NULL, handle_client, (void *) cli);
 
         sleep(1);
     }

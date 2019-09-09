@@ -14,6 +14,7 @@ static char * s_strdup(const char * s);
 
 ol_uids_t ol_uids = NULL; /* online list head */
 pthread_mutex_t clients_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t alive_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 void * handle_client(void * arg)
 {
@@ -25,6 +26,7 @@ void * handle_client(void * arg)
     int is_login = 0; /* 登入标志 0 未登入；1 登入 */
 
     client_t * pcli = (client_t *) arg;
+    printf("%s: %p\n", __FUNCTION__, pcli);
 
     cli_info = print_client_addr(pcli->addr);
     log_info("<< accept %s client", cli_info);
@@ -38,6 +40,10 @@ void * handle_client(void * arg)
 
     while (read(pcli->connfd, &msgprot, sizeof(msgprot_t)) > 0)
     {
+        pthread_mutex_lock(&alive_mutex);
+        pcli->alive = 9;
+        pthread_mutex_unlock(&alive_mutex);
+
         msglen = message_unpack(pcli->connfd, &buffer_in, msgprot.length);
         if (msglen <= 0)
         {
@@ -93,12 +99,12 @@ void * handle_client(void * arg)
             }
             else if (!strcmp(command, "/login"))
             {
-                if (1 == is_login)
-                {
-                    send_message_self("<< already have other users logged in\n", pcli->connfd);
-                    free(buffer_in);
-                    continue;
-                }
+                /* if (1 == is_login) */
+                /* { */
+                /*     send_message_self("<< already have other users logged in\n", pcli->connfd); */
+                /*     free(buffer_in); */
+                /*     continue; */
+                /* } */
                 param1 = strtok(NULL, " "); /* uid */
                 param2 = strtok(NULL, " "); /* pwd */
                 if (param1 == NULL || param2 == NULL)
@@ -122,8 +128,11 @@ void * handle_client(void * arg)
                 {
                     status = verify_uid_pwd(uid, param2, login_name);
                 }
+                printf("login name: %s\n", login_name);
+
                 if (0 == status)
                 {
+#if 0
                     /* 需要修改在线列表中的 uid 和 name，列表 client_t 是复制了一份 */
                     if (NULL == online_modify(pcli->uid, uid, login_name)) /* 这个 uid 已经登入了 */
                     {
@@ -132,6 +141,7 @@ void * handle_client(void * arg)
                         free(buffer_in);
                         continue;
                     }
+#endif
                     pcli->uid = uid; /* 修改完列表，再修改当前 client_t 信息 */
                     strcpy(pcli->name, login_name);
                     is_login = 1; /* 登入成功 */
@@ -149,7 +159,6 @@ void * handle_client(void * arg)
                     send_message_self("<< uid not found\n", pcli->connfd);
                     free(buffer_in);
                 }
-
             }
             else if (!strcmp(command, "/msg"))
             {
@@ -225,7 +234,6 @@ void * handle_client(void * arg)
                 {
                     modify_pwd_name(pcli->uid, NULL, param1); /* TODO: 错误检查 */
                 }
-                online_modify(pcli->uid, 0, param1);
                 strcpy(pcli->name, param1);
                 sprintf(buffer_out, "<< %s is now konwn as %s\n", oldname, pcli->name);
                 free(oldname);
@@ -291,11 +299,14 @@ void * handle_client(void * arg)
             free(buffer_in);
         }
     }
-
     log_info("<< %s (%d) has left", pcli->name, pcli->uid);
-    online_delete(pcli->uid);
-    close(pcli->connfd);
-    free(pcli);
+    online_delete(pcli->uid); /* 这里只是释放了节点空间 */
+    if (pcli->alive > 0)
+    {
+        close(pcli->connfd); /* 需要先关闭 fd, 再删除 client_t */
+        pcli->connfd = -1;
+    }
+    printf("free pcli\n");
 
     return (void *) EXIT_SUCCESS;
 }
@@ -305,7 +316,7 @@ void online_add(client_t * pcli)
 {
     pthread_mutex_lock(&clients_mutex);
     online_t * ponline = (online_t *) malloc(sizeof(online_t));
-    ponline->client = *pcli;
+    ponline->pclient = pcli;
 
     ponline->next = ol_uids;
     ol_uids = ponline;
@@ -320,7 +331,7 @@ void online_delete(int uid)
 {
     pthread_mutex_lock(&clients_mutex);
     ol_uids_t pnode = ol_uids;
-    if (pnode->client.uid == uid)
+    if (pnode->pclient->uid == uid)
     {
         ol_uids = pnode->next;
         free(pnode);
@@ -333,7 +344,7 @@ void online_delete(int uid)
     while (pnode != NULL)
     {
         /* printf("[DEBUG]: delete %p | %p\n", pprev, pprev->next); */
-        if (pnode->client.uid == uid)
+        if (pnode->pclient->uid == uid)
         {
             pprev->next = pnode->next;
             free(pnode);
@@ -345,6 +356,29 @@ void online_delete(int uid)
     pthread_mutex_unlock(&clients_mutex);
 }
 
+void * client_alive(void * arg)
+{
+    client_t * pcli = (client_t *) arg;
+    while (pcli->connfd != -1)
+    {
+        pthread_mutex_lock(&alive_mutex);
+        --(pcli->alive);
+        printf("alive: %d\n", pcli->alive);
+        pthread_mutex_unlock(&alive_mutex);
+
+        if (0 == pcli->alive)
+            break;
+        sleep(1);
+    }
+    if (pcli->connfd != -1)
+    {
+        close(pcli->connfd);
+    }
+
+    return (void *) EXIT_SUCCESS;
+}
+
+#if 0
 online_t * online_modify(int uid, int newuid, const char * newname)
 {
     pthread_mutex_lock(&clients_mutex);
@@ -383,6 +417,7 @@ online_t * online_modify(int uid, int newuid, const char * newname)
     pthread_mutex_unlock(&clients_mutex);
     return found;
 }
+#endif
 
 /* send message to sender */
 void send_message_self(const char * msg, int connfd)
@@ -410,9 +445,9 @@ int send_message_client(const char * msg, int uid)
     online_t * pscan = ol_uids ;
     while (pscan != NULL)
     {
-        if (pscan->client.uid == uid)
+        if (pscan->pclient->uid == uid)
         {
-            if (write(pscan->client.connfd, pmsgprot, sizeof(msgprot_t) + pmsgprot->length) < 0)
+            if (write(pscan->pclient->connfd, pmsgprot, sizeof(msgprot_t) + pmsgprot->length) < 0)
             {
                 log_error("fowarding message to client failed: %s", strerror(errno));
                 /* close(pscan->client.connfd); */
@@ -440,11 +475,11 @@ void send_message(char * msg, int uid)
 
     while (pnode != NULL)
     {
-        if (pnode->client.uid != uid)
+        if (pnode->pclient->uid != uid)
         {
-            if (write(pnode->client.connfd, pmsgprot, sizeof(msgprot_t) + pmsgprot->length) < 0)
+            if (write(pnode->pclient->connfd, pmsgprot, sizeof(msgprot_t) + pmsgprot->length) < 0)
             {
-                log_error("send to uid %d failed: %s", pnode->client.uid, strerror(errno));
+                log_error("send to uid %d failed: %s", pnode->pclient->uid, strerror(errno));
                 continue;
             }
         }
@@ -463,7 +498,7 @@ void send_active_clients(int connfd)
 
     while (pnode != NULL)
     {
-        sprintf(msg, "%s (%d)\n", pnode->client.name, pnode->client.uid);
+        sprintf(msg, "%s (%d)\n", pnode->pclient->name, pnode->pclient->uid);
         pmsgprot = message_pack(msg);
         if (write(connfd, pmsgprot, sizeof(msgprot_t) + pmsgprot->length) < 0)
         {
@@ -503,4 +538,3 @@ char * s_strdup(const char * s)
     }
     return p;
 }
-
