@@ -112,8 +112,8 @@ void load_arguments(int argc, char ** argv)
                 printf("options:\n");
                 printf("\t--help, -h\n\t\tshow help information\n");
                 printf("\t--config <filename>, -f <filename>\n\t\tspecify configure file\n");
-                printf("\t--bind_ip <ipaddress>, -i <ipaddress>\n");
-                printf("\t--port <port>, -p <port>\n");
+                printf("\t--server_ip <ipaddress>, -i <ipaddress>\n\t\tspecify server ip\n");
+                printf("\t--port <port>, -p <port>\n\t\tspecify server port\n");
                 exit(EXIT_FAILURE);
             case 'f':
                 break;

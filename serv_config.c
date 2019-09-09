@@ -25,7 +25,7 @@ config_t configs =
 /* read server config */
 void read_server_config()
 {
-    FILE * fp = fopen("./server.conf", "r");
+    FILE * fp = fopen(configs.config, "r");
     if (NULL == fp)
     {
         log_error("opening config failed: %s", strerror(errno));
@@ -83,12 +83,12 @@ void load_arguments(int argc, char ** argv)
                 printf("options:\n");
                 printf("\t--help, -h\n\t\tshow help information\n");
                 printf("\t--config <filename>, -f <filename>\n\t\tspecify configure file\n");
-                printf("\t--bind_ip <ipaddress>, -i <ipaddress>\n");
-                printf("\t--port <port>, -p <port>\n");
-                printf("\t--storage <type>, -s <type>\n");
-                printf("\t--quiet, -q\n");
-                printf("\t--logpath <path>, -l <path>\n");
-                printf("\t--daemon, -d\n");
+                printf("\t--bind_ip <ipaddress>, -i <ipaddress>\n\t\tspecify server bind ip\n");
+                printf("\t--port <port>, -p <port>\n\t\tspecify server bind port\n");
+                printf("\t--storage <type>, -s <type>\n\t\tspecfiy storage type for storing register users\n");
+                printf("\t--quiet, -q\n\t\trun as quiet mode\n");
+                printf("\t--logpath <path>, -l <path>\n\t\tspecify log path\n");
+                printf("\t--daemon, -d\n\t\trun as daemon\n");
                 exit(EXIT_FAILURE);
             case 'f':
                 break;
