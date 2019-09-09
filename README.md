@@ -14,6 +14,8 @@ Makefile:
 * [Building And Using Static And Shared "C" Libraries](http://docencia.ac.upc.edu/FIB/USO/Bibliografia/unix-c-libraries.html)
 * [Practical Makefiles, by example](http://nuclear.mutantstargoat.com/articles/make/)
 * [Add .so and .a libraries to Makefile](https://stackoverflow.com/q/12054858/3737970)
+* [Run make in each subdirectory](https://stackoverflow.com/q/17834582/3737970)
+* [Makefiles and subdirectories](https://www.linuxquestions.org/questions/programming-9/makefiles-and-subdirectories-794088/)
 
 TCP:
 
