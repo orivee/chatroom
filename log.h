@@ -3,6 +3,7 @@
 
 #include <stdio.h>
 #include <stdarg.h>
+#include <errno.h>
 #include <pthread.h>
 
 enum {LOG_ERROR, LOG_INFO, LOG_DEBUG};
