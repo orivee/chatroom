@@ -1,0 +1,5 @@
+2019-09-09 10:26:18 | INFO  | server.c   | main:153 | load server config from file
+2019-09-09 10:26:18 | INFO  | server.c   | main:154 | load server config from command arguments
+2019-09-09 10:26:18 | INFO  | server.c   | main:155 | config: addr: 127.0.0.1, port: 7000, logpath: server.log
+2019-09-09 10:26:18 | INFO  | server.c   | main:169 | user storing uses by file
+2019-09-09 10:26:18 | INFO  | server.c   | main:177 | <[ SERVER STARTED ]>

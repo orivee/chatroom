@@ -1,25 +1,45 @@
-objects =
-CFLAGS = -Wall -pthread -I/usr/include/mysql -I/usr/include/mysql/mysql
+# set compiler and compile options
+TARGET = server client
+CC = gcc
+CFLAGS = -Wall -Wextra -g -pthread $(shell mysql_config --cflags)
 LDFLAGS = -pthread
-LDLIBS = -L/usr/lib/ -lmariadb
-CC=gcc
+LDLIBS = $(shell mysql_config --libs)
 
-all: server client
-.PHONEY: all
+# set a list of directories
+# INCDIR = include
+BUILDDIR := build
+BINDIR := bin
+SRCDIR := src
 
-server: server.o msgprot.o serv_config.o handle_client.o user_manage.o log.o
-client: client.o msgprot.o log.o
+# set the include folder where the .h files reside
+CFLAGS += -I$(SRCDIR)
 
-server.o: server.c
-client.o: client.c
+SRCEXT := c
+SRV_SOURCES := $(shell find $(SRCDIR)/server -type f -name "*.$(SRCEXT)")
+SRV_OBJECTS := $(patsubst $(SRCDIR)/%,$(BUILDDIR)/%,$(SRV_SOURCES:.$(SRCEXT)=.o))
+CLI_SOURCES := $(shell find $(SRCDIR)/client -type f -name "*.$(SRCEXT)")
+CLI_OBJECTS := $(patsubst $(SRCDIR)/%,$(BUILDDIR)/%,$(CLI_SOURCES:.$(SRCEXT)=.o))
 
-serv_config.o:  serv_config.c
-handle_client.o: handle_client.c
-user_manage.o:	user_manage.c
+all: $(TARGET)
 
-msgprot.o: msgprot.c
-log.o: log.c
+server: $(SRV_OBJECTS)
+	@echo " Linking ..."
+	@echo " $(CC) $(LDFLAGS) $^ -o $(BINDIR)/server $(LDLIBS)"; $(CC) $(LDFLAGS) $^ -o $(BINDIR)/server $(LDLIBS)
 
-.PHONEY: clean
+$(BUILDDIR)/server/%.o: $(SRCDIR)/server/%.c
+	@mkdir -p $(BUILDDIR)/server
+	@echo " $(CC) $(CFLAGS) -c -o $@ $<"; $(CC) $(CFLAGS) -c -o $@ $<
+
+client: $(CLI_OBJECTS)
+	@echo " Linking ..."
+	@echo " $(CC) $(LDFLAGS) $^ -o $(BINDIR)/client"; $(CC) $(LDFLAGS) $^ -o $(BINDIR)/client
+
+$(BUILDDIR)/client/%.o: $(SRCDIR)/client/%.c
+	@mkdir -p $(BUILDDIR)/client
+	@echo " $(CC) $(CFLAGS) -c -o $@ $<"; $(CC) $(CFLAGS) -c -o $@ $<
+
 clean:
-	-rm -f *.o server client
+	@echo " Cleaning ...";
+	@echo " $(RM) -r $(BUILDDIR) $(foreach exec,$(TARGET),$(BINDIR)/$(exec))"; $(RM) -r $(BUILDDIR) $(foreach exec, $(TARGET), $(BINDIR)/$(exec))
+
+.PHONY: clean
