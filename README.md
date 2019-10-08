@@ -61,6 +61,19 @@ options:
                 specify server p
 ```
 
+### 客户端支持的命令
+
+| Command       | Parameter             |                                     |
+| ------------- | --------------------- | ----------------------------------- |
+| /quit         |                       | Leave the chatroom                  |
+| /register     | \<password\> [name]   | Register in chatroom                |
+| /login        | \<uid\> \<password\>  | Log in chatroom                     |
+| /nick         | \<name\>              | Change nickname                     |
+| /msg          | \<uid\> \<message\>   | Send private message                |
+| /list         |                       | Show active clients                 |
+| /pwd          | \<password\>          | Change the password                 |
+| /help         |                       | Show this help                      |
+
 ## 配置
 
 `etc/server.conf`
